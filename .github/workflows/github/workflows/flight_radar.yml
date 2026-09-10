@@ -2,11 +2,9 @@ name: Qassim Flight Radar 24/7
 
 on:
   schedule:
-    # يعمل تلقائياً كل ساعتين بتوقيت غرينتش
     - cron: '0 */2 * * *'
-  workflow_dispatch: # يتيح لك تشغيل الفحص بضغطة زر يدوياً من موقع GitHub
+  workflow_dispatch:
 
-# إعطاء السيرفر صلاحية حفظ وتحديث الملفات داخل المستودع تلقائياً
 permissions:
   contents: write
 
@@ -40,5 +38,6 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main || true
           git add -A
-          git diff --quiet && git diff --staged --quiet || (git commit -m "🔄 تحديث أرشيف الأسعار السحابي تلقائياً" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🔄 تحديث أرشيف الأسعار السحابي تلقائياً" && git push origin main)
