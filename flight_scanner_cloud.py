@@ -61,6 +61,7 @@ def send_telegram_msg(message, high_priority=False):
 
 def sync_to_google_sheets(results):
     if not GOOGLE_SHEET_WEBHOOK_URL.startswith("http"):
+        print("⚠️ رابط Webhook غير مضبوط")
         return
 
     payload_data = {
@@ -86,7 +87,7 @@ def sync_to_google_sheets(results):
             headers={"Content-Type": "application/json"}
         )
         with urllib.request.urlopen(req, timeout=20) as resp:
-            pass
+            print("📤 تم إرسال التحديث إلى Google Sheets بنجاح!")
     except Exception as e:
         print(f"⚠️ خطأ رفع الشيت: {e}")
 
@@ -154,13 +155,20 @@ def parse_flight_card_text(text):
     cleaned = re.sub(r'\d+\s*(?:kg|كجم|co2e?).*', '', text, flags=re.IGNORECASE)
 
     price = None
+    # دعم صيغ الأسعار المختلفة (SAR, ر.س, أو الرمز المباشر)
     matches = re.findall(r'(?:sar|ر\.س|ريال)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال)', cleaned, re.IGNORECASE)
     for m1, m2 in matches:
         raw_val = m1 if m1 else m2
         v = int(raw_val.replace(',', ''))
-        if 200 <= v <= 3500:
+        if 150 <= v <= 4000:
             price = v
             break
+
+    # محاولة ثانية إذا كان الرقم مكتوباً بجانب علامة العملة
+    if not price:
+        alt_matches = re.findall(r'(\d{3,4})\s*(?:SAR|ر\.س)', cleaned)
+        if alt_matches:
+            price = int(alt_matches[0])
 
     airline = parse_airline_name(text)
     return price, airline, time_ar, raw_time
@@ -174,27 +182,31 @@ def run_cloud_scan():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            locale="en-US",
+            locale="ar-SA",
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             viewport={"width": 1366, "height": 768}
         )
+        
+        # تخطي كوكيز جوجل لجميع السيرفرات الأوروبية
+        context.add_cookies([
+            {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"}
+        ])
+        
         page = context.new_page()
 
         for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
-            url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop"
+            # إجبار جوجل على استخدام عملة الريال السعودي واللغة العربية
+            url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=ar"
             cheapest_flight = None
 
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=18000)
-                time.sleep(1.8)
-
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                
+                # الانتظار حتى ظهور كروت الطيران فعلياً
                 try:
-                    cookie_btn = page.locator("button:has-text('Accept all'), button:has-text('I agree'), button:has-text('Reject all')")
-                    if cookie_btn.count() > 0:
-                        cookie_btn.first.click(timeout=2000)
-                        time.sleep(1.2)
+                    page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=5000)
                 except Exception:
-                    pass
+                    time.sleep(2.5)
 
                 cards = page.locator("li.pIav2d, div.pIav2d").all()
                 nonstop_options = []
@@ -218,7 +230,7 @@ def run_cloud_scan():
                     else:
                         cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
 
-            except Exception:
+            except Exception as e:
                 pass
 
             if cheapest_flight:
@@ -259,13 +271,12 @@ def run_cloud_scan():
             else:
                 print(f"[{idx}/{len(pairs)}] ℹ️ تم فحص الرابط: {trip_type}")
 
-            time.sleep(random.uniform(0.8, 1.5))
+            time.sleep(random.uniform(0.5, 1.2))
 
         browser.close()
 
     save_history(history)
 
-    # إنشاء ملف الإكسل دائماً حتى لو كانت القائمة فارغة في الدورة الأولى
     if results:
         results = sorted(results, key=lambda x: x["السعر"])
         sync_to_google_sheets(results)
@@ -274,7 +285,7 @@ def run_cloud_scan():
         df = pd.DataFrame(columns=["نوع العطلة", "تاريخ الذهاب", "وقت الإقلاع", "تاريخ العودة", "الناقل", "السعر", "الرابط"])
 
     df.to_excel(EXCEL_FILE, index=False)
-    print("✅ اكتمل الفحص السحابي وتم تحديث الأرشيف وجداول Google Sheets بنجاح!")
+    print(f"✅ اكتمل الفحص السحابي بنجاح! تم رصد {len(results)} رحلة وتحديث الأرشيف.")
 
 if __name__ == "__main__":
     run_cloud_scan()
