@@ -14,8 +14,6 @@ jobs:
     steps:
       - name: 📥 استرجاع ملفات المشروع
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: 🐍 تثبيت بيئة بايثون
         uses: actions/setup-python@v5
@@ -40,7 +38,5 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main || true
           git add -A
-          git commit -m "🔄 تحديث أرشيف الأسعار السحابي تلقائياً" || echo "لا توجد تعديلات جديدة للحفظ"
-          git push origin main || echo "تم تجاوز تعارض الحفظ بنجاح"
+          git diff --staged --quiet || (git commit -m "🔄 تحديث أرشيف الأسعار السحابي تلقائياً" && git push)
