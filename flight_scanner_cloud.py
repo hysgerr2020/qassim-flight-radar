@@ -14,12 +14,12 @@ import matplotlib.pyplot as plt
 from playwright.sync_api import sync_playwright
 
 # ==========================================
-# ⚙️ قراءة المتغيرات من خزنة GitHub Secrets
+# ⚙️ الروابط والمفاتيح المباشرة للربط
 # ==========================================
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-GOOGLE_SHEET_WEBHOOK_URL = os.environ.get("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbw68e6xp3NAJZPigmyzLOgd-jhC_F5SNefhrkQ90WazioIV00xsMJsx9guBU81_LLwBQA/exec")
-GOOGLE_SHEET_VIEW_URL = os.environ.get("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0"
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or "536683079"
+GOOGLE_SHEET_WEBHOOK_URL = os.environ.get("GOOGLE_SHEET_WEBHOOK_URL") or "https://script.google.com/macros/s/AKfycbw68e6xp3NAJZPigmyzLOgd-jhC_F5SNefhrkQ90WazioIV00xsMJsx9guBU81_LLwBQA/exec"
+GOOGLE_SHEET_VIEW_URL = os.environ.get("GOOGLE_SHEET_VIEW_URL") or "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0"
 
 HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
