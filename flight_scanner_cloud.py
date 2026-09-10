@@ -14,12 +14,12 @@ import matplotlib.pyplot as plt
 from playwright.sync_api import sync_playwright
 
 # ==========================================
-# ⚙️ الروابط والمفاتيح المباشرة للربط
+# ⚙️ الروابط والمفاتيح المباشرة الثابتة
 # ==========================================
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0"
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or "536683079"
-GOOGLE_SHEET_WEBHOOK_URL = os.environ.get("GOOGLE_SHEET_WEBHOOK_URL") or "https://script.google.com/macros/s/AKfycbw68e6xp3NAJZPigmyzLOgd-jhC_F5SNefhrkQ90WazioIV00xsMJsx9guBU81_LLwBQA/exec"
-GOOGLE_SHEET_VIEW_URL = os.environ.get("GOOGLE_SHEET_VIEW_URL") or "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0"
+TELEGRAM_BOT_TOKEN = "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0"
+TELEGRAM_CHAT_ID = "536683079"
+GOOGLE_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw68e6xp3NAJZPigmyzLOgd-jhC_F5SNefhrkQ90WazioIV00xsMJsx9guBU81_LLwBQA/exec"
+GOOGLE_SHEET_VIEW_URL = "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0"
 
 HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
@@ -42,8 +42,6 @@ def save_history(hist):
         print(f"⚠️ فشل حفظ السجل: {e}")
 
 def send_telegram_msg(message, high_priority=False):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         params = {
@@ -60,10 +58,6 @@ def send_telegram_msg(message, high_priority=False):
         print(f"⚠️ خطأ إرسال التيليجرام: {e}")
 
 def sync_to_google_sheets(results):
-    if not GOOGLE_SHEET_WEBHOOK_URL.startswith("http"):
-        print("⚠️ رابط Webhook غير مضبوط")
-        return
-
     payload_data = {
         "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %I:%M %p"),
         "flights": [
@@ -86,8 +80,8 @@ def sync_to_google_sheets(results):
             data=payload_bytes,
             headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            print("📤 تم إرسال وتحديث البيانات في Google Sheets بنجاح!")
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            print(f"📤 تم إرسال وتحديث {len(results)} رحلة في Google Sheets بنجاح! (كود الاستجابة: {resp.getcode()})")
     except Exception as e:
         print(f"⚠️ خطأ رفع الشيت: {e}")
 
@@ -191,7 +185,6 @@ def run_cloud_scan():
             viewport={"width": 1366, "height": 768}
         )
         
-        # تخطي شاشة كوكيز جوجل التلقائية
         context.add_cookies([
             {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"},
             {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
@@ -207,7 +200,6 @@ def run_cloud_scan():
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=18000)
 
-                # تخطي أي شاشة موافقة طارئة
                 if "consent.google.com" in page.url:
                     try:
                         page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
@@ -225,7 +217,6 @@ def run_cloud_scan():
 
                 for c in cards:
                     txt = c.inner_text()
-                    # دعم كل مسميات الطيران المباشر (إنجليزي وعربي)
                     if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
                         price, airline, time_ar, raw_time = parse_flight_card_text(txt)
                         if price:
