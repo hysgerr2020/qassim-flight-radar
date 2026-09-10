@@ -57,18 +57,21 @@ def send_telegram_msg(message, high_priority=False):
     except Exception as e:
         print(f"⚠️ خطأ إرسال التيليجرام: {e}")
 
-try:
-        payload_bytes = json.dumps(payload_data).encode("utf-8")
-        req = urllib.request.Request(
-            GOOGLE_SHEET_WEBHOOK_URL,
-            data=payload_bytes,
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=25) as resp:
-            body = resp.read().decode("utf-8")
-            print(f"📤 رد سيرفر جوجل المباشر: {body[:300]}")
-    except Exception as e:
-        print(f"⚠️ خطأ رفع الشيت: {e}")
+def sync_to_google_sheets(results):
+    payload_data = {
+        "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %I:%M %p"),
+        "flights": [
+            {
+                "trip_type": item["نوع العطلة"],
+                "dep": f"{item['تاريخ الذهاب']} ({item['وقت الإقلاع']})" if item.get("وقت الإقلاع") else item["تاريخ الذهاب"],
+                "ret": item["تاريخ العودة"],
+                "airline": item["الناقل"],
+                "price": item["السعر"],
+                "link": item["الرابط"]
+            }
+            for item in results
+        ]
+    }
 
     try:
         payload_bytes = json.dumps(payload_data).encode("utf-8")
@@ -78,7 +81,8 @@ try:
             headers={"Content-Type": "application/json"}
         )
         with urllib.request.urlopen(req, timeout=25) as resp:
-            print(f"📤 تم إرسال وتحديث {len(results)} رحلة في Google Sheets بنجاح! (كود الاستجابة: {resp.getcode()})")
+            body = resp.read().decode("utf-8")
+            print(f"📤 رد سيرفر جوجل المباشر: {body[:300]}")
     except Exception as e:
         print(f"⚠️ خطأ رفع الشيت: {e}")
 
