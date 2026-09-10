@@ -4,7 +4,7 @@ on:
   schedule:
     # يعمل تلقائياً كل ساعتين على مدار اليوم 24/7
     - cron: '0 */2 * * *'
-  workflow_dispatch: # يتيح لك تشغيل الفحص بضغطة زر يدوياً في أي وقت
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull origin main --rebase || true
           git add -A
           git diff-index --quiet HEAD || git commit -m "🔄 تحديث أرشيف وتاريخ الأسعار تلقائياً"
+          git pull --rebase origin main || true
           git push origin main || true
