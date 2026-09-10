@@ -14,12 +14,19 @@ import matplotlib.pyplot as plt
 from playwright.sync_api import sync_playwright
 
 # ==========================================
-# ⚙️ إعدادات الرادار والمتغيرات السحابية
+# ⚙️ قراءة المتغيرات السحابية مع التنظيف الذاتي
 # ==========================================
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "536683079")
-GOOGLE_SHEET_WEBHOOK_URL = os.environ.get("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbw68e6xp3NAJZPigmyzLOgd-jhC_F5SNefhrkQ90WazioIV00xsMJsx9guBU81_LLwBQA/exec")
-GOOGLE_SHEET_VIEW_URL = os.environ.get("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
+def clean_env(key, default=""):
+    val = os.environ.get(key, default)
+    if val:
+        # إزالة أي أقواس مربعة أو علامات اقتباس أو مسافات قد تضاف خطأ في GitHub Secrets
+        return val.strip("[]'\" \t\r\n")
+    return default
+
+TELEGRAM_BOT_TOKEN = clean_env("TELEGRAM_BOT_TOKEN", "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0")
+TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
+GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbw68e6xp3NAJZPigmyzLOgd-jhC_F5SNefhrkQ90WazioIV00xsMJsx9guBU81_LLwBQA/exec")
+GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
 HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
@@ -98,6 +105,10 @@ def send_telegram_photo(photo_path, caption=""):
 
 
 def sync_to_google_sheets(results):
+    if not GOOGLE_SHEET_WEBHOOK_URL.startswith("http"):
+        print(f"⚠️ رابط الويب هوك غير صالح: {GOOGLE_SHEET_WEBHOOK_URL}")
+        return
+
     ksa_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %I:%M %p")
     payload_data = {
         "updated_at": f"{ksa_time} (توقيت مكة)",
@@ -132,7 +143,6 @@ def get_all_monitored_pairs(months_ahead=3):
     end_date = today + datetime.timedelta(days=months_ahead * 30)
     pairs = []
 
-    # إجازات اليوم الوطني والمناسبات الرسمية
     special_events = [
         ("2026-09-22", "2026-09-26", "🇸🇦 إجازة اليوم الوطني (ثلاثاء إلى سبت)"),
         ("2026-09-23", "2026-09-26", "🇸🇦 إجازة اليوم الوطني (أربعاء إلى سبت)"),
@@ -460,7 +470,7 @@ def run_cloud_scan():
         # تحديد ما إذا كان يجب إرسال النشرة الصباحية أو تقرير التشغيل اليدوي
         ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
-        is_morning_window = (8 <= ksa_now.hour < 10)  # نافذة النشرة الصباحية بتوقيت السعودية
+        is_morning_window = (8 <= ksa_now.hour < 10)
 
         if is_manual_trigger or is_morning_window:
             print("📢 إرسال التقرير الشامل والمخطط البياني للتيليجرام...")
