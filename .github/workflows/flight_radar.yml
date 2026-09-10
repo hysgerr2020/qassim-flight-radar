@@ -38,5 +38,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main --rebase || true
           git add -A
-          git diff --staged --quiet || (git commit -m "🔄 تحديث أرشيف الأسعار السحابي تلقائياً" && git push)
+          git diff-index --quiet HEAD || git commit -m "🔄 تحديث أرشيف الأسعار تلقائياً"
+          git push origin main || true
