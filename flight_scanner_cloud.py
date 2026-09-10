@@ -59,7 +59,7 @@ def send_telegram_msg(message, high_priority=False):
 
 def sync_to_google_sheets(results):
     payload_data = {
-        "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %I:%M %p"),
+        "updated_at": (datetime.datetime.utcnow() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %I:%M %p") + " (توقيت مكة)",
         "flights": [
             {
                 "trip_type": item["نوع العطلة"],
