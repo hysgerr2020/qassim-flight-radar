@@ -16,20 +16,14 @@ from playwright.sync_api import sync_playwright
 # ==========================================
 # ⚙️ قراءة المتغيرات من خزنة GitHub Secrets
 # ==========================================
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "536683079")
-GOOGLE_SHEET_WEBHOOK_URL = os.environ.get("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbw68e6xp3NAJZPigmyzLOgd-jhC_F5SNefhrkQ90WazioIV00xsMJsx9guBU81_LLwBQA/exec")
-GOOGLE_SHEET_VIEW_URL = os.environ.get("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+GOOGLE_SHEET_WEBHOOK_URL = os.environ.get("GOOGLE_SHEET_WEBHOOK_URL", "")
+GOOGLE_SHEET_VIEW_URL = os.environ.get("GOOGLE_SHEET_VIEW_URL", "")
 
 HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
 CHART_IMAGE_PATH = "flight_price_chart.png"
-
-BAGGAGE_FEES = {
-    "طيران أديل": 140,
-    "طيران ناس": 150,
-    "الخطوط السعودية": 0
-}
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
@@ -48,6 +42,8 @@ def save_history(hist):
         print(f"⚠️ فشل حفظ السجل: {e}")
 
 def send_telegram_msg(message, high_priority=False):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         params = {
@@ -174,7 +170,6 @@ def run_cloud_scan():
     pairs = get_all_monitored_pairs(months_ahead=3)
     results = []
     history = load_history()
-    target_price = 450
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -190,8 +185,16 @@ def run_cloud_scan():
             cheapest_flight = None
 
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=16000)
+                page.goto(url, wait_until="domcontentloaded", timeout=18000)
                 time.sleep(1.8)
+
+                try:
+                    cookie_btn = page.locator("button:has-text('Accept all'), button:has-text('I agree'), button:has-text('Reject all')")
+                    if cookie_btn.count() > 0:
+                        cookie_btn.first.click(timeout=2000)
+                        time.sleep(1.2)
+                except Exception:
+                    pass
 
                 cards = page.locator("li.pIav2d, div.pIav2d").all()
                 nonstop_options = []
@@ -223,13 +226,14 @@ def run_cloud_scan():
                 air = cheapest_flight["airline"]
                 f_time = cheapest_flight["time_ar"]
                 flight_key = f"{dep}_{ret}"
+                print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
                 prev_p = history.get(flight_key)
                 is_deep_drop = prev_p and (prev_p - cur_p >= 70)
                 is_rock_bottom = cur_p <= 310
 
                 if is_deep_drop or is_rock_bottom:
-                    reason = f"📉 هبوط حاد بمقدار {prev_p - cur_p} ر.س!" if is_deep_drop else "🔥 كسر سعر القاع التاريخي (أقل من 310 ر.س)!"
+                    reason = f"📉 هبوط بمقدار {prev_p - cur_p} ر.س!" if is_deep_drop else "🔥 كسر سعر القاع التاريخي!"
                     flash_msg = (
                         f"⚡🚨 <b>عرض ترويجي خاطف (رصد سحابي 24/7)</b>\n\n"
                         f"🗓 <b>{trip_type}</b>\n"
@@ -252,6 +256,8 @@ def run_cloud_scan():
                     "السعر": cur_p,
                     "الرابط": url
                 })
+            else:
+                print(f"[{idx}/{len(pairs)}] ℹ️ تم فحص الرابط: {trip_type}")
 
             time.sleep(random.uniform(0.8, 1.5))
 
@@ -259,12 +265,16 @@ def run_cloud_scan():
 
     save_history(history)
 
+    # إنشاء ملف الإكسل دائماً حتى لو كانت القائمة فارغة في الدورة الأولى
     if results:
         results = sorted(results, key=lambda x: x["السعر"])
         sync_to_google_sheets(results)
         df = pd.DataFrame(results)
-        df.to_excel(EXCEL_FILE, index=False)
-        print("✅ اكتمل الفحص السحابي وتم تحديث الأرشيف وجداول Google Sheets بنجاح!")
+    else:
+        df = pd.DataFrame(columns=["نوع العطلة", "تاريخ الذهاب", "وقت الإقلاع", "تاريخ العودة", "الناقل", "السعر", "الرابط"])
+
+    df.to_excel(EXCEL_FILE, index=False)
+    print("✅ اكتمل الفحص السحابي وتم تحديث الأرشيف وجداول Google Sheets بنجاح!")
 
 if __name__ == "__main__":
     run_cloud_scan()
