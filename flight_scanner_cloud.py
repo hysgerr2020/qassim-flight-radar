@@ -87,7 +87,7 @@ def sync_to_google_sheets(results):
             headers={"Content-Type": "application/json"}
         )
         with urllib.request.urlopen(req, timeout=20) as resp:
-            print("📤 تم إرسال التحديث إلى Google Sheets بنجاح!")
+            print("📤 تم إرسال وتحديث البيانات في Google Sheets بنجاح!")
     except Exception as e:
         print(f"⚠️ خطأ رفع الشيت: {e}")
 
@@ -155,7 +155,6 @@ def parse_flight_card_text(text):
     cleaned = re.sub(r'\d+\s*(?:kg|كجم|co2e?).*', '', text, flags=re.IGNORECASE)
 
     price = None
-    # دعم صيغ الأسعار المختلفة (SAR, ر.س, أو الرمز المباشر)
     matches = re.findall(r'(?:sar|ر\.س|ريال)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال)', cleaned, re.IGNORECASE)
     for m1, m2 in matches:
         raw_val = m1 if m1 else m2
@@ -164,11 +163,13 @@ def parse_flight_card_text(text):
             price = v
             break
 
-    # محاولة ثانية إذا كان الرقم مكتوباً بجانب علامة العملة
     if not price:
-        alt_matches = re.findall(r'(\d{3,4})\s*(?:SAR|ر\.س)', cleaned)
-        if alt_matches:
-            price = int(alt_matches[0])
+        alt_matches = re.findall(r'\b(\d{3,4})\b', cleaned)
+        for val in alt_matches:
+            v = int(val)
+            if 200 <= v <= 3500:
+                price = v
+                break
 
     airline = parse_airline_name(text)
     return price, airline, time_ar, raw_time
@@ -180,40 +181,52 @@ def run_cloud_scan():
     history = load_history()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+        )
         context = browser.new_context(
-            locale="ar-SA",
+            locale="en-US",
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             viewport={"width": 1366, "height": 768}
         )
         
-        # تخطي كوكيز جوجل لجميع السيرفرات الأوروبية
+        # تخطي شاشة كوكيز جوجل التلقائية
         context.add_cookies([
-            {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"}
+            {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"},
+            {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
         ])
         
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = context.new_page()
 
         for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
-            # إجبار جوجل على استخدام عملة الريال السعودي واللغة العربية
-            url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=ar"
+            url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
             cheapest_flight = None
 
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=20000)
-                
-                # الانتظار حتى ظهور كروت الطيران فعلياً
+                page.goto(url, wait_until="domcontentloaded", timeout=18000)
+
+                # تخطي أي شاشة موافقة طارئة
+                if "consent.google.com" in page.url:
+                    try:
+                        page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
+                        page.wait_for_load_state("domcontentloaded", timeout=6000)
+                    except Exception:
+                        pass
+
                 try:
-                    page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=5000)
+                    page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=4500)
                 except Exception:
-                    time.sleep(2.5)
+                    time.sleep(1.5)
 
                 cards = page.locator("li.pIav2d, div.pIav2d").all()
                 nonstop_options = []
 
                 for c in cards:
                     txt = c.inner_text()
-                    if "nonstop" in txt.lower() or "مباشر" in txt:
+                    # دعم كل مسميات الطيران المباشر (إنجليزي وعربي)
+                    if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
                         price, airline, time_ar, raw_time = parse_flight_card_text(txt)
                         if price:
                             nonstop_options.append({
@@ -230,7 +243,7 @@ def run_cloud_scan():
                     else:
                         cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
 
-            except Exception as e:
+            except Exception:
                 pass
 
             if cheapest_flight:
@@ -271,7 +284,7 @@ def run_cloud_scan():
             else:
                 print(f"[{idx}/{len(pairs)}] ℹ️ تم فحص الرابط: {trip_type}")
 
-            time.sleep(random.uniform(0.5, 1.2))
+            time.sleep(random.uniform(0.4, 0.9))
 
         browser.close()
 
@@ -285,7 +298,7 @@ def run_cloud_scan():
         df = pd.DataFrame(columns=["نوع العطلة", "تاريخ الذهاب", "وقت الإقلاع", "تاريخ العودة", "الناقل", "السعر", "الرابط"])
 
     df.to_excel(EXCEL_FILE, index=False)
-    print(f"✅ اكتمل الفحص السحابي بنجاح! تم رصد {len(results)} رحلة وتحديث الأرشيف.")
+    print(f"✅ اكتمل الفحص بنجاح! تم رصد {len(results)} رحلة وتحديث Google Sheets.")
 
 if __name__ == "__main__":
     run_cloud_scan()
