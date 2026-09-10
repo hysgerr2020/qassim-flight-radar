@@ -35,6 +35,7 @@ jobs:
         run: python flight_scanner_cloud.py
 
       - name: 💾 حفظ وتحديث سجل الأسعار في المستودع
+        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
