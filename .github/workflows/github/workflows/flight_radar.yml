@@ -1,0 +1,39 @@
+name: Qassim Flight Radar 24/7
+
+on:
+  schedule:
+    # يعمل تلقائياً كل ساعتين بتوقيت غرينتش
+    - cron: '0 */2 * * *'
+  workflow_dispatch: # يتيح لك تشغيل الفحص بضغطة زر يدوياً من موقع GitHub
+
+jobs:
+  flight-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 استرجاع ملفات المشروع
+        uses: actions/checkout@v4
+
+      - name: 🐍 تثبيت بيئة بايثون
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 تثبيت المكتبات والمتصفح السحابي
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: 🚀 تشغيل محرك فحص الرحلات
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOOGLE_SHEET_WEBHOOK_URL: ${{ secrets.GOOGLE_SHEET_WEBHOOK_URL }}
+          GOOGLE_SHEET_VIEW_URL: ${{ secrets.GOOGLE_SHEET_VIEW_URL }}
+        run: python flight_scanner_cloud.py
+
+      - name: 💾 حفظ وتحديث سجل الأسعار في المستودع
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "🔄 تحديث أرشيف الأسعار السحابي تلقائياً"
+          file_pattern: "flight_price_history.json google_flights_weekends.xlsx"
