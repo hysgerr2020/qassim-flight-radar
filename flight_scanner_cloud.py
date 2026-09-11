@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from playwright.sync_api import sync_playwright
 
 # ==========================================
-# ⚙️ قراءة المتغيرات السحابية مع التنظيف الذاتي
+# ⚙️ قراءة المتغيرات السحابية وتنظيفها
 # ==========================================
 def clean_env(key, default=""):
     val = os.environ.get(key, default)
@@ -40,6 +40,40 @@ BAGGAGE_FEES = {
     "طيران ناس": 150,
     "الخطوط السعودية": 0
 }
+
+# ==========================================
+# 🛡️ مصفوفة بصمات التصفح للتخفي ومقاومة الحظر
+# ==========================================
+REALISTIC_PROFILES = [
+    {
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "viewport": {"width": 1440, "height": 900},
+        "platform": "Win32",
+        "vendor": "Google Inc.",
+        "renderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0",
+        "viewport": {"width": 1366, "height": 768},
+        "platform": "Win32",
+        "vendor": "Google Inc.",
+        "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+    },
+    {
+        "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "viewport": {"width": 1536, "height": 864},
+        "platform": "MacIntel",
+        "vendor": "Apple Computer, Inc.",
+        "renderer": "Apple M2 Pro"
+    },
+    {
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0",
+        "viewport": {"width": 1920, "height": 1080},
+        "platform": "Win32",
+        "vendor": "",
+        "renderer": "AMD Radeon RX 6700 XT"
+    }
+]
 
 
 def load_history():
@@ -375,27 +409,63 @@ def build_briefing_message(items):
     return text
 
 
+def create_stealth_context(browser):
+    """إنشاء سياق تصفح متخفٍ ومحصن بمحاكاة السلوك البشري"""
+    profile = random.choice(REALISTIC_PROFILES)
+    context = browser.new_context(
+        locale="ar-SA",
+        timezone_id="Asia/Riyadh",
+        user_agent=profile["ua"],
+        viewport=profile["viewport"],
+        device_scale_factor=1,
+        is_mobile=False,
+        has_touch=False
+    )
+
+    context.add_cookies([
+        {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"},
+        {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
+    ])
+
+    # حقن سكريبتات إخفاء الآلية ومحاكاة العتاد
+    stealth_js = f"""
+    // 1. إخفاء مؤشر التشغيل الآلي
+    Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
+    
+    // 2. تزييف لغات المتصفح الطبيعية
+    Object.defineProperty(navigator, 'languages', {{ get: () => ['ar-SA', 'ar', 'en-US', 'en'] }});
+    
+    // 3. تزييف كرت الشاشة الحقيقي لمنع كشف SwiftShader
+    const getParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter) {{
+        if (parameter === 37445) return '{profile["vendor"]}';
+        if (parameter === 37446) return '{profile["renderer"]}';
+        return getParameter.apply(this, arguments);
+    }};
+
+    // 4. محاكاة وجود إضافات المتصفح
+    Object.defineProperty(navigator, 'plugins', {{ get: () => [1, 2, 3, 4, 5] }});
+    """
+    context.add_init_script(stealth_js)
+    return context
+
+
 def run_custom_date_probe(dep, ret):
-    """فاحص خاطف ومباشر لتواريخ مخصصة حرة (ذهاب وعودة)"""
-    print(f"🎯 بدء الفاحص الخاطف للتواريخ الحرة: {dep} ⬅ {ret}")
+    print(f"🎯 بدء الفاحص الخاطف للتواريخ الحرة (درع التخفي مفعّل): {dep} ⬅ {ret}")
     url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
     available_flights = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-infobars"
+            ]
         )
-        context = browser.new_context(
-            locale="en-US",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            viewport={"width": 1366, "height": 768}
-        )
-        context.add_cookies([
-            {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"},
-            {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
-        ])
-        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        context = create_stealth_context(browser)
         page = context.new_page()
 
         try:
@@ -407,8 +477,10 @@ def run_custom_date_probe(dep, ret):
                 except Exception:
                     pass
 
+            # تمرير خفيف لمحاكاة التفاعل الطبيعي
+            page.mouse.wheel(0, random.randint(150, 300))
             try:
-                page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=5000)
+                page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=6000)
             except Exception:
                 time.sleep(2)
 
@@ -440,7 +512,6 @@ def run_custom_date_probe(dep, ret):
         send_telegram_msg(msg, high_priority=True)
         return
 
-    # استخراج الخيارات
     available_flights.sort(key=lambda x: x["price"])
     cheapest = available_flights[0]
 
@@ -452,7 +523,6 @@ def run_custom_date_probe(dep, ret):
         f"   💰 <b>{cheapest['price']} ر.س إجمالي</b> — ✈️ {cheapest['airline']} (⏰ {cheapest['time_ar']})\n"
     ]
 
-    # إضافة تفصيل كل شركة طيران متوفرة
     seen_airlines = set()
     lines.append("📋 <b>الخيارات المباشرة المتوفرة:</b>")
     for f in available_flights:
@@ -472,14 +542,13 @@ def run_custom_date_probe(dep, ret):
 
 
 def run_cloud_scan():
-    # التحقق: هل هذا استدعاء مخصص لتواريخ حرة؟
     if CUSTOM_DEP and CUSTOM_RET:
         run_custom_date_probe(CUSTOM_DEP, CUSTOM_RET)
         return
 
     start_time = time.time()
     now_ts = int(start_time)
-    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان التلقائي 24/7...")
+    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان (درع التخفي مفعّل)...")
     pairs = get_all_monitored_pairs(months_ahead=3)
     results = []
     hist_state = load_history()
@@ -490,64 +559,67 @@ def run_cloud_scan():
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
-            )
-            context = browser.new_context(
-                locale="en-US",
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-                viewport={"width": 1366, "height": 768}
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-infobars"
+                ]
             )
 
-            context.add_cookies([
-                {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"},
-                {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
-            ])
-            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            context = create_stealth_context(browser)
             page = context.new_page()
 
             for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
                 url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
                 cheapest_flight = None
 
-                try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=18000)
-
-                    if "consent.google.com" in page.url:
-                        try:
-                            page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
-                            page.wait_for_load_state("domcontentloaded", timeout=6000)
-                        except Exception:
-                            pass
-
+                # محاولة فحص مع دعم إعادة المحاولة الذكية (Exponential Backoff)
+                for attempt in range(2):
                     try:
-                        page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=4500)
+                        page.goto(url, wait_until="domcontentloaded", timeout=18000)
+
+                        if "consent.google.com" in page.url:
+                            try:
+                                page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
+                                page.wait_for_load_state("domcontentloaded", timeout=5000)
+                            except Exception:
+                                pass
+
+                        # سلوك تفاعلي بشري
+                        page.mouse.wheel(0, random.randint(100, 250))
+
+                        try:
+                            page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=4500)
+                        except Exception:
+                            time.sleep(1.5)
+
+                        cards = page.locator("li.pIav2d, div.pIav2d").all()
+                        nonstop_options = []
+
+                        for c in cards:
+                            txt = c.inner_text()
+                            if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
+                                price, airline, time_ar, raw_time = parse_flight_card_text(txt)
+                                if price:
+                                    nonstop_options.append({
+                                        "price": price,
+                                        "airline": airline,
+                                        "time_ar": time_ar,
+                                        "raw_time": raw_time
+                                    })
+
+                        if nonstop_options:
+                            if "جمعة إلى سبت" in trip_type:
+                                pm_options = [o for o in nonstop_options if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
+                                cheapest_flight = min(pm_options, key=lambda x: x["price"]) if pm_options else min(nonstop_options, key=lambda x: x["price"])
+                            else:
+                                cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
+                            break  # تم الرصد بنجاح
+
                     except Exception:
-                        time.sleep(1.5)
-
-                    cards = page.locator("li.pIav2d, div.pIav2d").all()
-                    nonstop_options = []
-
-                    for c in cards:
-                        txt = c.inner_text()
-                        if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
-                            price, airline, time_ar, raw_time = parse_flight_card_text(txt)
-                            if price:
-                                nonstop_options.append({
-                                    "price": price,
-                                    "airline": airline,
-                                    "time_ar": time_ar,
-                                    "raw_time": raw_time
-                                })
-
-                    if nonstop_options:
-                        if "جمعة إلى سبت" in trip_type:
-                            pm_options = [o for o in nonstop_options if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
-                            cheapest_flight = min(pm_options, key=lambda x: x["price"]) if pm_options else min(nonstop_options, key=lambda x: x["price"])
-                        else:
-                            cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
-
-                except Exception:
-                    pass
+                        if attempt == 0:
+                            time.sleep(2)  # انتظار وإعادة المحاولة
 
                 if cheapest_flight:
                     cur_p = cheapest_flight["price"]
@@ -603,7 +675,8 @@ def run_cloud_scan():
                         "الرابط": url
                     })
 
-                time.sleep(random.uniform(0.5, 1.2))
+                # تأخير زمني بشري عشوائي لمنع رصد التتابع الآلي
+                time.sleep(random.uniform(0.7, 1.6))
 
             browser.close()
 
