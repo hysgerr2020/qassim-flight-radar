@@ -628,38 +628,53 @@ def run_cloud_scan():
                     flight_key = f"{dep}_{ret}"
                     print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
+                    # ==========================================
+                    # 🎯 محرك صائد القيعان والهبوط الساحق والنسب المئوية
+                    # ==========================================
                     prev_p = price_history.get(flight_key)
                     last_alert = alert_history.get(flight_key, {})
                     last_alert_p = last_alert.get("price", 9999)
                     last_alert_ts = last_alert.get("time", 0)
 
-                    is_deep_drop = prev_p and (prev_p - cur_p >= 60)
-                    is_rock_bottom = cur_p <= 358
+                    # حساب نسبة وفرق الهبوط المئوي
+                    diff_amount = (prev_p - cur_p) if prev_p else 0
+                    drop_percentage = round((diff_amount / prev_p) * 100) if (prev_p and prev_p > 0) else 0
+
+                    # تصنيف مستويات التنبيه
+                    is_crash_drop = drop_percentage >= 50       # هبوط ساحق (50% أو أكثر)
+                    is_deep_drop = diff_amount >= 60           # هبوط نقدي ملحوظ (60 ر.س فأكثر)
+                    is_rock_bottom = cur_p <= 358              # سعر القاع الترويجي المطلق
 
                     should_alert = False
-                    if is_deep_drop or is_rock_bottom:
-                        if cur_p < last_alert_p:
-                            should_alert = True
-                        elif (now_ts - last_alert_ts) >= 86400:
+                    if is_crash_drop or is_deep_drop or is_rock_bottom:
+                        if cur_p < last_alert_p or (now_ts - last_alert_ts) >= 86400:
                             should_alert = True
 
                     if should_alert:
-                        if is_deep_drop:
-                            reason = f"📉 هبوط استثنائي مفاجئ بمقدار <b>{prev_p - cur_p} ر.س</b>!"
-                        else:
-                            reason = "🔥 <b>بلوغ سعر القاع التاريخي الترويجي (358 ر.س أو أقل)!</b>"
-
                         direct_url = get_direct_booking_link(air, dep, ret)
+
+                        # صياغة عنوان وطبيعة التنبيه بإنذار مميز حسب قوة الصفقة
+                        if is_crash_drop:
+                            header_title = "🚨🔥 <b>صفقة الموسم: انهيار سعري ساحق (خطأ تسعيري محتمل)!</b>"
+                            reason = f"💥 <b>هبوط جنوني بنسبة {drop_percentage}%</b> (وفّرت <b>{diff_amount} ر.س</b> دفعة واحدة!)"
+                        elif is_rock_bottom:
+                            header_title = "🔥 <b>صائد القيعان التلقائي: بلوغ سعر القاع التاريخي!</b>"
+                            reason = "🎯 <b>السعر وصل للقاع الترويجي الأدنى (358 ر.س أو أقل ذهاب وعودة).</b>"
+                        else:
+                            header_title = "⚡📉 <b>رادار الهبوط السريع: انخفاض ملحوظ في السعر</b>"
+                            reason = f"📉 هبوط بمقدار <b>{diff_amount} ر.س</b> ({drop_percentage}%) عن آخر فحص."
+
                         flash_msg = (
-                            f"⚡🚨 <b>صائد القيعان التلقائي (اقتناص صفقة عاجلة)</b>\n\n"
+                            f"{header_title}\n\n"
                             f"🗓 <b>{trip_type}</b>\n"
                             f"🛫 <b>الذهاب:</b> <code>{dep}</code> (⏰ {f_time})\n"
                             f"🛬 <b>العودة:</b> <code>{ret}</code>\n"
                             f"✈️ <b>الناقل:</b> {air}\n"
-                            f"💰 <b>السعر الإجمالي:</b> <b>{cur_p} ر.س فقط!</b>\n"
-                            f"📢 <b>نوع التنبيه:</b> {reason}\n\n"
-                            f"✈️ <a href='{direct_url}'><b>حجز مباشر من موقع {air} فوراً ↗</b></a>\n"
-                            f"🔍 <a href='{url}'>فحص ومقارنة على Google Flights ↗</a>"
+                            f"💰 <b>السعر الجديد:</b> <b>{cur_p} ر.س فقط!</b> " + (f"<i>(كان {prev_p} ر.س)</i>\n" if prev_p else "\n") +
+                            f"📢 <b>طبيعة الصفقة:</b> {reason}\n\n"
+                            f"⚡ <i>يُوصى بالحجز فوراً قبل تعديل المقاعد أو إغلاق الفئة.</i>\n\n"
+                            f"✈️ <a href='{direct_url}'><b>اقتناص التذكرة فوراً من موقع {air} ↗</b></a>\n"
+                            f"🔍 <a href='{url}'>فحص ومقارنة البدائل على Google Flights ↗</a>"
                         )
                         send_telegram_msg(flash_msg, high_priority=True)
                         alert_history[flight_key] = {"price": cur_p, "time": now_ts}
