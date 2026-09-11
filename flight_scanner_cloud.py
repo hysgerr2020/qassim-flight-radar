@@ -730,6 +730,15 @@ def run_cloud_scan():
             send_telegram_msg(briefing_text)
 
         df.to_excel(EXCEL_FILE, index=False)
+        # تصدير نسخة JSON لخدمة تطبيق التيليجرام المصغر (Telegram Mini App)
+        ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+        mini_app_payload = {
+            "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
+            "flights": results
+        }
+        with open("flights_data.json", "w", encoding="utf-8") as f:
+            json.dump(mini_app_payload, f, ensure_ascii=False, indent=2)
+        print("📱 تم توليد وتحديث ملف بيانات التطبيق المصغر (flights_data.json) بنجاح!")
         print(f"✅ اكتملت الدورة السحابية وصيد القيعان بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة.")
 
 
