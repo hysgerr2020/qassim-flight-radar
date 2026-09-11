@@ -43,7 +43,7 @@
         </div>
         <div>
           <h1 class="text-base font-extrabold text-white leading-tight">رادار طيران القصيم ⇄ جدة</h1>
-          <p id="lastUpdateText" class="text-xs text-slate-400">جاري مزامنة البيانات الحية...</p>
+          <p id="lastUpdateText" class="text-xs text-slate-400">جاري تحميل البيانات...</p>
         </div>
       </div>
       <button onclick="fetchLatestData()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95">
@@ -149,17 +149,18 @@
         if (!res.ok) throw new Error("تعذر جلب ملف البيانات");
         const data = await res.json();
         
-        // دعم مرن لجميع مسميات المفاتيح القادمة من بايثون أو الشيت
+        // ربط مباشر بالمفاتيح العربية الدقيقة القادمة من بايثون
         rawFlights = (data.flights || []).map(item => ({
-          trip_type: item.trip_type || item["نوع العطلة"] || "رحلة مباشرة",
-          dep: item.dep || item["تاريخ الذهاب"] || "",
-          ret: item.ret || item["تاريخ العودة"] || "",
-          airline: item.airline || item["الناقل"] || "رحلة مباشرة",
-          price: Number(item.price || item["السعر"] || 0),
-          link: item.link || item["الرابط"] || "https://www.google.com/travel/flights"
+          trip_type: item["نوع العطلة"] || "رحلة مباشرة",
+          dep: item["تاريخ الذهاب"] || "",
+          time: item["وقت الإقلاع"] || "",
+          ret: item["تاريخ العودة"] || "",
+          airline: item["الناقل"] || "رحلة مباشرة",
+          price: Number(item["السعر"] || 0),
+          link: item["الرابط"] || "https://www.google.com/travel/flights"
         }));
 
-        document.getElementById('lastUpdateText').innerText = "آخر فحص سحابي: " + (data.updated_at || "الآن");
+        document.getElementById('lastUpdateText').innerText = "آخر فحص: " + (data.updated_at || "الآن");
         
         updateStats();
         renderFlights();
@@ -263,9 +264,9 @@
 
           <div class="flex items-center justify-between">
             <div>
-              <div class="text-xs text-slate-400">تواريخ الرحلة</div>
+              <div class="text-xs text-slate-400">تفاصيل الموعد الإقلاع</div>
               <div class="text-sm font-bold text-white mt-0.5">
-                ذهاب: <code>${item.dep}</code>
+                ذهاب: <code>${item.dep}</code> (${item.time})
               </div>
               <div class="text-xs text-slate-400">
                 عودة: <code>${item.ret}</code>
