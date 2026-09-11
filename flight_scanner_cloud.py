@@ -563,6 +563,13 @@ def run_custom_date_probe(dep, ret):
             browser.close()
 
     if not available_flights:
+        # تجربة المحرك الاحتياطي المزدوج للبحث المخصص
+        print(f"⚡ تفعيل المحرك الاحتياطي للبحث المخصص [{dep}]...")
+        fallback_res = fallback_http_probe(dep, ret)
+        if fallback_res:
+            available_flights.append(fallback_res)
+
+    if not available_flights:
         msg = (
             f"🔍 <b>تقرير الفحص المخصص (القصيم ⇄ جدة)</b>\n\n"
             f"🛫 <b>الذهاب:</b> <code>{dep}</code>\n"
@@ -576,7 +583,6 @@ def run_custom_date_probe(dep, ret):
     available_flights.sort(key=lambda x: x["price"])
     cheapest = available_flights[0]
 
-    # حساب مؤشر الثقة للرحلة المخصصة
     pred = analyze_price_prediction(cheapest["price"], dep)
 
     lines = [
@@ -605,6 +611,7 @@ def run_custom_date_probe(dep, ret):
 
     send_telegram_msg("\n".join(lines), high_priority=True)
     print("✅ تم إرسال تقرير الفحص المخصص للتيليجرام بنجاح!")
+
 
 # ==========================================
 # 🛡️ المحرك الاحتياطي المزدوج (Dual-Engine Fallback)
@@ -635,6 +642,8 @@ def fallback_http_probe(dep, ret):
     except Exception as err:
         print(f"⚠️ المحرك الاحتياطي لم يتمكن من جلب السعر لـ {dep}: {err}")
     return None
+
+
 def run_cloud_scan():
     if CUSTOM_DEP and CUSTOM_RET:
         run_custom_date_probe(CUSTOM_DEP, CUSTOM_RET)
@@ -667,10 +676,11 @@ def run_cloud_scan():
             for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
                 url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
                 cheapest_flight = None
+                playwright_failed = False
 
                 for attempt in range(2):
                     try:
-                        page.goto(url, wait_until="domcontentloaded", timeout=18000)
+                        page.goto(url, wait_until="domcontentloaded", timeout=15000)
 
                         if "consent.google.com" in page.url:
                             try:
@@ -707,11 +717,20 @@ def run_cloud_scan():
                                 cheapest_flight = min(pm_options, key=lambda x: x["price"]) if pm_options else min(nonstop_options, key=lambda x: x["price"])
                             else:
                                 cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
+                            playwright_failed = False
                             break
+                        else:
+                            playwright_failed = True
 
                     except Exception:
+                        playwright_failed = True
                         if attempt == 0:
                             time.sleep(2)
+
+                # تفعيل المحرك الاحتياطي المزدوج في حال تعذر أو فشل Playwright
+                if playwright_failed or not cheapest_flight:
+                    print(f"⚡ تفعيل المحرك الاحتياطي (Fallback Engine) للرحلة [{dep}]...")
+                    cheapest_flight = fallback_http_probe(dep, ret)
 
                 if cheapest_flight:
                     cur_p = cheapest_flight["price"]
@@ -725,7 +744,6 @@ def run_cloud_scan():
                     last_alert_p = last_alert.get("price", 9999)
                     last_alert_ts = last_alert.get("time", 0)
 
-                    # محرك التنبؤ وحساب مؤشر الشراء وتوقع المسار
                     pred = analyze_price_prediction(cur_p, dep, prev_p)
 
                     diff_amount = (prev_p - cur_p) if prev_p else 0
@@ -804,14 +822,27 @@ def run_cloud_scan():
     hist_state["alerts"] = alert_history
     save_history(hist_state)
 
+    # صمام أمان سلامة البيانات (Data Integrity Guardrail): منع تصفير الشيت أو الـ JSON عند أي عطل نادر
     if not results:
-        send_telegram_msg("⚠️🚨 تحذير: اكتملت دورة الفحص ولكن لم يتم رصد أي رحلة (0 نتائج)!", high_priority=True)
-    else:
+        print("⚠️ لم يتم رصد نتائج جديدة، تفعيل استرجاع آخر نسخة صالحة من السجل لحماية التطبيق...")
+        if os.path.exists(MINI_APP_DATA_FILE):
+            try:
+                with open(MINI_APP_DATA_FILE, "r", encoding="utf-8") as f:
+                    old_data = json.load(f)
+                    results = old_data.get("flights", [])
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء استرجاع البيانات الاحتياطية: {e}")
+
+        send_telegram_msg(
+            "⚠️ <b>تحذير رادار الطيران:</b> لم تسجل دورة الفحص الأخيرة بيانات حية جديدة، وتم الإبقاء على آخر قاعدة بيانات نشطة لحماية الـ Mini App من التوقف.",
+            high_priority=False
+        )
+
+    if results:
         results = sorted(results, key=lambda x: x["السعر"])
         sync_to_google_sheets(results, duration)
         df = pd.DataFrame(results)
 
-        # حفظ نسخة JSON التفاعلية لدعم الـ Telegram Mini App مع بيانات الذكاء التنبؤي
         ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
         mini_app_payload = {
             "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
@@ -834,6 +865,8 @@ def run_cloud_scan():
 
         df.to_excel(EXCEL_FILE, index=False)
         print(f"✅ اكتملت الدورة السحابية وصيد القيعان بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة.")
+    else:
+        send_telegram_msg("⚠️🚨 تحذير: تعذر الوصول إلى نتائج الفحص ولم يتوفر أرشيف احتياطي!", high_priority=True)
 
 
 if __name__ == "__main__":
