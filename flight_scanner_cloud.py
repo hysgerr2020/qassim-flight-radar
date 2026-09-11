@@ -28,11 +28,13 @@ TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
 GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbwglVr2b3S7C97mMKKL2pJNct_yO3R10Fz0a3JCBsbYxtax56-tz-7_8SFwh6RubIdQJw/exec")
 GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
+CUSTOM_DEP = clean_env("CUSTOM_DEP", "")
+CUSTOM_RET = clean_env("CUSTOM_RET", "")
+
 HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
 CHART_IMAGE_PATH = "flight_price_chart.png"
 
-# تكلفة حقيبة الشحن التقديرية (20 كجم ذهاب وعودة)
 BAGGAGE_FEES = {
     "طيران أديل": 140,
     "طيران ناس": 150,
@@ -41,14 +43,12 @@ BAGGAGE_FEES = {
 
 
 def load_history():
-    """تحميل سجل الأسعار وسجل التنبيهات بطريقة متوافقة وسلسة"""
     default_state = {"prices": {}, "alerts": {}}
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    # التوافق مع الإصدارات السابقة إذا كانت مفاتيح مباشرة
                     if "prices" not in data:
                         return {"prices": data, "alerts": {}}
                     return data
@@ -66,7 +66,6 @@ def save_history(hist_data):
 
 
 def get_direct_booking_link(airline, dep, ret):
-    """توليد رابط الحجز المباشر لموقع شركة الطيران مع التواريخ"""
     air = airline or ""
     if "أديل" in air or "flyadeal" in air.lower():
         return f"https://www.flyadeal.com/ar/search-flight?origin=ELQ&destination=JED&departureDate={dep}&returnDate={ret}&adults=1&tripType=RoundTrip"
@@ -75,6 +74,15 @@ def get_direct_booking_link(airline, dep, ret):
     elif "السعودية" in air or "saudia" in air.lower():
         return f"https://www.saudia.com/ar/booking?origin=ELQ&destination=JED&departureDate={dep}&returnDate={ret}&adults=1&tripType=RoundTrip"
     return f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=ar&gl=sa"
+
+
+def get_google_calendar_link(trip_type, airline, dep, ret, price, url):
+    dep_clean = dep.replace("-", "")
+    ret_clean = ret.replace("-", "")
+    title = urllib.parse.quote(f"✈️ رحلة القصيم ⇄ جدة ({airline})")
+    details = urllib.parse.quote(f"🗓 {trip_type}\n💰 السعر الإجمالي: {price} ر.س\n✈️ الناقل: {airline}\n🔗 رابط الحجز: {url}")
+    location = urllib.parse.quote("مطار الأمير نايف بن عبدالعزيز (ELQ) ⇄ مطار الملك عبدالعزيز (JED)")
+    return f"https://calendar.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dep_clean}/{ret_clean}&details={details}&location={location}"
 
 
 def send_telegram_msg(message, reply_markup=None, high_priority=False):
@@ -367,7 +375,108 @@ def build_briefing_message(items):
     return text
 
 
+def run_custom_date_probe(dep, ret):
+    """فاحص خاطف ومباشر لتواريخ مخصصة حرة (ذهاب وعودة)"""
+    print(f"🎯 بدء الفاحص الخاطف للتواريخ الحرة: {dep} ⬅ {ret}")
+    url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
+    available_flights = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
+        )
+        context = browser.new_context(
+            locale="en-US",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 768}
+        )
+        context.add_cookies([
+            {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"},
+            {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
+        ])
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        page = context.new_page()
+
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            if "consent.google.com" in page.url:
+                try:
+                    page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
+                    page.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass
+
+            try:
+                page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=5000)
+            except Exception:
+                time.sleep(2)
+
+            cards = page.locator("li.pIav2d, div.pIav2d").all()
+            for c in cards:
+                txt = c.inner_text()
+                if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
+                    price, airline, time_ar, raw_time = parse_flight_card_text(txt)
+                    if price:
+                        available_flights.append({
+                            "price": price,
+                            "airline": airline,
+                            "time_ar": time_ar,
+                            "raw_time": raw_time
+                        })
+        except Exception as e:
+            print(f"⚠️ خطأ أثناء الفحص المخصص: {e}")
+        finally:
+            browser.close()
+
+    if not available_flights:
+        msg = (
+            f"🔍 <b>تقرير الفحص المخصص (القصيم ⇄ جدة)</b>\n\n"
+            f"🛫 <b>الذهاب:</b> <code>{dep}</code>\n"
+            f"🛬 <b>العودة:</b> <code>{ret}</code>\n\n"
+            f"⚠️ لم يتم العثور على رحلات مباشرة متوفرة في هذين التاريخين، أو أن المقاعد قد نفدت بالكامل.\n\n"
+            f"🔗 <a href='{url}'>فحص رحلات الترانزيت أو التواريخ المجاورة على Google Flights ↗</a>"
+        )
+        send_telegram_msg(msg, high_priority=True)
+        return
+
+    # استخراج الخيارات
+    available_flights.sort(key=lambda x: x["price"])
+    cheapest = available_flights[0]
+
+    lines = [
+        f"🎯 <b>نتيجة الفحص المخصص الفوري (القصيم ⇄ جدة)</b>\n",
+        f"🛫 <b>تاريخ الذهاب:</b> <code>{dep}</code>\n"
+        f"🛬 <b>تاريخ العودة:</b> <code>{ret}</code>\n",
+        f"🏆 <b>أفضل خيار متاح:</b>\n"
+        f"   💰 <b>{cheapest['price']} ر.س إجمالي</b> — ✈️ {cheapest['airline']} (⏰ {cheapest['time_ar']})\n"
+    ]
+
+    # إضافة تفصيل كل شركة طيران متوفرة
+    seen_airlines = set()
+    lines.append("📋 <b>الخيارات المباشرة المتوفرة:</b>")
+    for f in available_flights:
+        air_name = f["airline"]
+        if air_name not in seen_airlines:
+            seen_airlines.add(air_name)
+            bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air_name else f" (+{BAGGAGE_FEES.get(air_name, 140)} حقيبة)"
+            dir_link = get_direct_booking_link(air_name, dep, ret)
+            lines.append(f"• <b>{f['price']} ر.س</b> — ✈️ {air_name}{bag_txt}\n  🔗 <a href='{dir_link}'>حجز مباشر من {air_name} ↗</a>")
+
+    cal_link = get_google_calendar_link("رحلة مخصصة", cheapest["airline"], dep, ret, cheapest["price"], url)
+    lines.append(f"\n📅 <a href='{cal_link}'>إضافة موعد الرحلة لتقويم Google ↗</a>")
+    lines.append(f"🔍 <a href='{url}'>مقارنة كافة تفاصيل الرحلة على Google Flights ↗</a>")
+
+    send_telegram_msg("\n".join(lines), high_priority=True)
+    print("✅ تم إرسال تقرير الفحص المخصص للتيليجرام بنجاح!")
+
+
 def run_cloud_scan():
+    # التحقق: هل هذا استدعاء مخصص لتواريخ حرة؟
+    if CUSTOM_DEP and CUSTOM_RET:
+        run_custom_date_probe(CUSTOM_DEP, CUSTOM_RET)
+        return
+
     start_time = time.time()
     now_ts = int(start_time)
     print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان التلقائي 24/7...")
@@ -447,27 +556,19 @@ def run_cloud_scan():
                     flight_key = f"{dep}_{ret}"
                     print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
-                    # ==========================================
-                    # 🎯 محرك صائد القيعان والهبوط الذكي
-                    # ==========================================
                     prev_p = price_history.get(flight_key)
                     last_alert = alert_history.get(flight_key, {})
                     last_alert_p = last_alert.get("price", 9999)
                     last_alert_ts = last_alert.get("time", 0)
 
-                    # شروط التنبيه:
-                    # 1. هبوط حاد بمقدار 60 ر.س فأكثر عن الفحص السابق
                     is_deep_drop = prev_p and (prev_p - cur_p >= 60)
-                    # 2. بلوغ سعر القاع التاريخي الترويجي (358 ر.س أو أقل)
                     is_rock_bottom = cur_p <= 358
 
-                    # شرط التبريد (Smart Cooldown):
-                    # نرسل التنبيه إذا كان السعر أقل من آخر تنبيه أرسلناه، أو مر 24 ساعة على الأقل
                     should_alert = False
                     if is_deep_drop or is_rock_bottom:
                         if cur_p < last_alert_p:
                             should_alert = True
-                        elif (now_ts - last_alert_ts) >= 86400:  # 24 ساعة
+                        elif (now_ts - last_alert_ts) >= 86400:
                             should_alert = True
 
                     if should_alert:
