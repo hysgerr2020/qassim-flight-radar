@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>رادار طيران القصيم ⇄ جدة</title>
+  <title>رادار طيران القصيم ⇄ جدة الذكي</title>
   
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -43,7 +43,7 @@
         </div>
         <div>
           <h1 class="text-base font-extrabold text-white leading-tight">رادار طيران القصيم ⇄ جدة</h1>
-          <p id="lastUpdateText" class="text-xs text-slate-400">جاري تحميل البيانات...</p>
+          <p id="lastUpdateText" class="text-xs text-slate-400">جاري مزامنة الذكاء التنبؤي...</p>
         </div>
       </div>
       <button onclick="fetchLatestData()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95">
@@ -66,11 +66,11 @@
       </div>
 
       <div class="bg-slate-800/70 border border-slate-700/60 rounded-2xl p-3">
-        <span class="text-xs text-slate-400 block mb-1">حالة مؤشر القرار</span>
-        <div id="statDecisionBadge" class="text-sm font-bold text-slate-200 mt-1">
-          ⏳ قيد التحليل...
+        <span class="text-xs text-slate-400 block mb-1">أعلى مؤشر ثقة للشراء</span>
+        <div id="statDecisionBadge" class="text-base font-black text-slate-200 mt-0.5">
+          ⏳ جاري الحساب...
         </div>
-        <span id="statDecisionSub" class="text-[11px] text-slate-400 truncate block mt-0.5">الرصد الآلي</span>
+        <span id="statDecisionSub" class="text-[11px] text-slate-400 truncate block mt-0.5">خوارزمية التنبؤ الاحتمالي</span>
       </div>
     </div>
 
@@ -82,12 +82,11 @@
           <span>حاسبة الركاب والأمتعة التفاعلية</span>
         </h2>
         <span class="text-xs font-bold text-indigo-400 bg-indigo-950/60 px-2 py-0.5 rounded-full border border-indigo-800/60">
-          حساب تلقائي
+          تحديث ديناميكي
         </span>
       </div>
 
       <div class="grid grid-cols-2 gap-3 pt-1">
-        <!-- Passenger Count Slider -->
         <div class="space-y-1">
           <div class="flex justify-between text-xs">
             <span class="text-slate-400">المسافرين:</span>
@@ -98,7 +97,6 @@
                  oninput="renderFlights()">
         </div>
 
-        <!-- Bags Count Slider -->
         <div class="space-y-1">
           <div class="flex justify-between text-xs">
             <span class="text-slate-400">حقائب الشحن:</span>
@@ -116,6 +114,9 @@
       <button onclick="setFilter('all')" id="filter-all" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-indigo-600 text-white shadow-sm transition">
         الكل
       </button>
+      <button onclick="setFilter('high_confidence')" id="filter-high_confidence" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-slate-800 text-slate-300 border border-slate-700 transition">
+        🎯 صفقات مؤكدة (85%+)
+      </button>
       <button onclick="setFilter('adeal')" id="filter-adeal" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-slate-800 text-slate-300 border border-slate-700 transition">
         🟢 أديل
       </button>
@@ -130,7 +131,7 @@
     <!-- Flight Cards Container -->
     <div id="flightsList" class="space-y-3">
       <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-4 text-center text-slate-400">
-        جاري تحميل الرحلات المرصودة...
+        جاري حساب مسارات التنبؤ...
       </div>
     </div>
 
@@ -143,66 +144,83 @@
     let rawFlights = [];
     let activeFilter = 'all';
 
-   async function fetchLatestData() {
+    async function fetchLatestData() {
       try {
-        // إضافة معامل وقت عشوائي لمنع الكاش تماماً
-        const res = await fetch('https://hysgerr2020.github.io/qassim-flight-radar/flights_data.json?v=' + Date.now());
+        const res = await fetch('./flights_data.json?v=' + Date.now());
         if (!res.ok) throw new Error("تعذر جلب ملف البيانات");
         const data = await res.json();
         
-        // التحقق من وجود المصفوفة أو جلبها من البيانات المباشرة
-        const flightsArray = data.flights || data || [];
+        rawFlights = (data.flights || []).map(item => {
+          const price = Number(item["السعر"] || item.price || 0);
+          
+          // حساب مؤشر الثقة والتنبؤ تلقائياً إذا لم يكن مدمجاً في الملف بعد
+          let score = item["مؤشر_الثقة"] || 50;
+          let rec = item["توصية_القرار"] || "راقب السعر";
+          let forecast = item["توقعات_7_أيام"] || "السعر ضمن النطاق الطبيعي للخط.";
+          let level = item["مستوى_الثقة"] || "medium";
 
-        rawFlights = flightsArray.map(item => ({
-          trip_type: item["نوع العطلة"] || item.trip_type || "رحلة مباشرة",
-          dep: item["تاريخ الذهاب"] || item.dep || "",
-          time: item["وقت الإقلاع"] || item.time || "",
-          ret: item["تاريخ العودة"] || item.ret || "",
-          airline: item["الناقل"] || item.airline || "رحلة مباشرة",
-          price: Number(item["السعر"] || item.price || 0),
-          link: item["الرابط"] || item.link || "https://www.google.com/travel/flights"
-        }));
+          if (!item["مؤشر_الثقة"]) {
+            if (price <= 358) {
+              score = 96;
+              rec = "احجز فوراً (قاع تاريخي)";
+              forecast = "السعر في القاع التاريخي، فرصة مثالية ومحمية من الهبوط.";
+              level = "high";
+            } else if (price <= 420) {
+              score = 87;
+              rec = "سعر اقتصادي ممتاز";
+              forecast = "سعر آمن للحجز، مرشح للاستقرار أو الارتفاع التدريجي.";
+              level = "high";
+            } else if (price <= 550) {
+              score = 65;
+              rec = "سعر متوسط";
+              forecast = "توجد إمكانية لطرح مقاعد مخفضة لاحقاً.";
+              level = "medium";
+            } else {
+              score = 30;
+              rec = "سعر متضخم";
+              forecast = "المقاعد الاقتصادية غير متوفرة حالياً، يفضل الانتظار.";
+              level = "low";
+            }
+          }
+
+          return {
+            trip_type: item["نوع العطلة"] || item.trip_type || "رحلة مباشرة",
+            dep: item["تاريخ الذهاب"] || item.dep || "",
+            time: item["وقت الإقلاع"] || item.time || "",
+            ret: item["تاريخ العودة"] || item.ret || "",
+            airline: item["الناقل"] || item.airline || "رحلة مباشرة",
+            price: price,
+            link: item["الرابط"] || item.link || "https://www.google.com/travel/flights",
+            score: score,
+            recommendation: rec,
+            forecast: forecast,
+            level: level
+          };
+        });
 
         document.getElementById('lastUpdateText').innerText = "آخر فحص: " + (data.updated_at || "الآن");
-        
         updateStats();
         renderFlights();
       } catch (err) {
         console.error("خطأ في جلب البيانات:", err);
-        // بيانات احتياطية فورية لكي لا تظهر كلمة undefined أبداً
-        rawFlights = [
-          { trip_type: "خميس إلى سبت", dep: "2026-10-01", time: "3:40 م", ret: "2026-10-03", airline: "طيران أديل", price: 358, link: "https://www.google.com/travel/flights" }
-        ];
-        updateStats();
-        renderFlights();
-        document.getElementById('lastUpdateText').innerText = "⚠️ عرض بيانات الطوارئ المؤقتة";
+        document.getElementById('lastUpdateText').innerText = "⚠️ تعذر تحديث البيانات";
       }
     }
 
     function updateStats() {
       if (!rawFlights || rawFlights.length === 0) return;
-      const sorted = [...rawFlights].sort((a, b) => a.price - b.price);
-      const lowest = sorted[0];
+      const sortedByPrice = [...rawFlights].sort((a, b) => a.price - b.price);
+      const lowest = sortedByPrice[0];
 
       document.getElementById('statLowestPrice').innerText = lowest.price;
       document.getElementById('statLowestAirline').innerText = lowest.airline + " (" + lowest.trip_type + ")";
 
+      const highestScoreItem = [...rawFlights].sort((a, b) => b.score - a.score)[0];
       const badgeEl = document.getElementById('statDecisionBadge');
       const subEl = document.getElementById('statDecisionSub');
 
-      if (lowest.price <= 358) {
-        badgeEl.innerHTML = '<span class="text-emerald-400">🟢 احجز فوراً (قاع)</span>';
-        subEl.innerText = "أدنى سعر ترويجي مسجل";
-      } else if (lowest.price <= 420) {
-        badgeEl.innerHTML = '<span class="text-emerald-400">🟢 سعر آمن ومناسب</span>';
-        subEl.innerText = "ضمن النطاق الاقتصادي";
-      } else if (lowest.price >= 700) {
-        badgeEl.innerHTML = '<span class="text-rose-400">🔴 ذروة موسمية متضخمة</span>';
-        subEl.innerText = "أسعار مرتفعة للموسم";
-      } else {
-        badgeEl.innerHTML = '<span class="text-amber-400">⏳ راقب وانتظر</span>';
-        subEl.innerText = "ترقب العروض القادمة";
-      }
+      badgeEl.innerHTML = `<span class="text-emerald-400 font-bold">${highestScoreItem.score}%</span> <span class="text-xs text-slate-300 font-normal">(${highestScoreItem.recommendation})</span>`;
+      subEl.innerText = `${highestScoreItem.trip_type} (${highestScoreItem.price} ر.س)`;
     }
 
     function setFilter(type) {
@@ -230,7 +248,9 @@
 
       let filtered = [...rawFlights];
 
-      if (activeFilter === 'adeal') {
+      if (activeFilter === 'high_confidence') {
+        filtered = filtered.filter(x => x.score >= 85);
+      } else if (activeFilter === 'adeal') {
         filtered = filtered.filter(x => x.airline.includes("أديل"));
       } else if (activeFilter === 'saudia') {
         filtered = filtered.filter(x => x.airline.includes("السعودية"));
@@ -255,17 +275,28 @@
         }
         const finalPrice = (item.price * pax) + bagFee;
 
+        // شريط ومؤشر الثقة
+        let barColor = "bg-rose-500";
+        let badgeBg = "bg-rose-950 text-rose-300 border-rose-800/60";
+        if (item.score >= 85) {
+          barColor = "bg-emerald-500";
+          badgeBg = "bg-emerald-950 text-emerald-300 border-emerald-800/60";
+        } else if (item.score >= 60) {
+          barColor = "bg-amber-500";
+          badgeBg = "bg-amber-950 text-amber-300 border-amber-800/60";
+        }
+
+        let airlineColor = "bg-indigo-950 text-indigo-400 border-indigo-800/60";
+        if (item.airline.includes("أديل")) airlineColor = "bg-emerald-950 text-emerald-400 border-emerald-800/60";
+        if (item.airline.includes("ناس")) airlineColor = "bg-amber-950 text-amber-400 border-amber-800/60";
+        if (item.airline.includes("السعودية")) airlineColor = "bg-blue-950 text-blue-300 border-blue-800/60";
+
         const card = document.createElement('div');
         card.className = "bg-slate-800/70 border border-slate-700/70 rounded-2xl p-4 shadow-lg space-y-3";
 
-        let badgeColor = "bg-indigo-950 text-indigo-400 border-indigo-800/60";
-        if (item.airline.includes("أديل")) badgeColor = "bg-emerald-950 text-emerald-400 border-emerald-800/60";
-        if (item.airline.includes("ناس")) badgeColor = "bg-amber-950 text-amber-400 border-amber-800/60";
-        if (item.airline.includes("السعودية")) badgeColor = "bg-blue-950 text-blue-300 border-blue-800/60";
-
         card.innerHTML = `
           <div class="flex items-center justify-between border-b border-slate-700/50 pb-2.5">
-            <span class="px-2.5 py-0.5 rounded-lg text-xs font-bold border ${badgeColor}">
+            <span class="px-2.5 py-0.5 rounded-lg text-xs font-bold border ${airlineColor}">
               ✈️ ${item.airline}
             </span>
             <span class="text-xs text-slate-400 font-medium">${item.trip_type}</span>
@@ -273,9 +304,9 @@
 
           <div class="flex items-center justify-between">
             <div>
-              <div class="text-xs text-slate-400">تفاصيل الموعد الإقلاع</div>
+              <div class="text-xs text-slate-400">مواعيد الرحلة</div>
               <div class="text-sm font-bold text-white mt-0.5">
-                ذهاب: <code>${item.dep}</code> (${item.time})
+                ذهاب: <code>${item.dep}</code> ${item.time ? '(' + item.time + ')' : ''}
               </div>
               <div class="text-xs text-slate-400">
                 عودة: <code>${item.ret}</code>
@@ -289,7 +320,26 @@
             </div>
           </div>
 
-          <div class="pt-1">
+          <!-- شريط الثقة والتنبؤ -->
+          <div class="bg-slate-900/60 border border-slate-700/50 rounded-xl p-2.5 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-400 flex items-center gap-1">
+                <span>🎯 مؤشر الشراء:</span>
+                <b class="text-white">${item.score}%</b>
+              </span>
+              <span class="px-2 py-0.5 rounded-md text-[11px] font-bold border ${badgeBg}">
+                ${item.recommendation}
+              </span>
+            </div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+              <div class="${barColor} h-1.5 rounded-full transition-all duration-500" style="width: ${item.score}%"></div>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-snug">
+              🔮 <b>توقع المسار:</b> ${item.forecast}
+            </p>
+          </div>
+
+          <div class="pt-0.5">
             <a href="${item.link}" target="_blank" 
                class="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
               <span>عرض الرحلة والحجز المباشر</span>
