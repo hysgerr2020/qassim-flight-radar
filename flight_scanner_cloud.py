@@ -19,13 +19,12 @@ from playwright.sync_api import sync_playwright
 def clean_env(key, default=""):
     val = os.environ.get(key, default)
     if val:
-        # إزالة أي أقواس مربعة أو علامات اقتباس أو مسافات قد تضاف خطأ في GitHub Secrets
         return val.strip("[]'\" \t\r\n")
     return default
 
 TELEGRAM_BOT_TOKEN = clean_env("TELEGRAM_BOT_TOKEN", "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0")
 TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
-GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbw68e6xp3NAJZPigmyzLOgd-jhC_F5SNefhrkQ90WazioIV00xsMJsx9guBU81_LLwBQA/exec")
+GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbwglVr2b3S7C97mMKKL2pJNct_yO3R10Fz0a3JCBsbYxtax56-tz-7_8SFwh6RubIdQJw/exec")
 GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
 HISTORY_FILE = "flight_price_history.json"
@@ -201,22 +200,25 @@ def parse_flight_card_text(text):
         raw_time = m_time.group(1).strip()
         time_ar = raw_time.replace("AM", "ص").replace("PM", "م").replace("am", "ص").replace("pm", "م")
 
+    # تنظيف أوزان الحقائب وانبعاثات الكربون حتى لا تختلط بالأسعار
     cleaned = re.sub(r'\d+\s*(?:kg|كجم|co2e?).*', '', text, flags=re.IGNORECASE)
 
     price = None
+    # 1. البحث المقترن برمز العملة: يقبل أي سعر حقيقي يبدأ من 10 ر.س (يلتقط العروض الترويجية الخارقة)
     matches = re.findall(r'(?:sar|ر\.س|ريال)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال)', cleaned, re.IGNORECASE)
     for m1, m2 in matches:
         raw_val = m1 if m1 else m2
         v = int(raw_val.replace(',', ''))
-        if 150 <= v <= 4000:
+        if 10 <= v <= 4000:
             price = v
             break
 
+    # 2. في حال كان السعر رقماً مجرداً دون رمز عملة
     if not price:
-        alt_matches = re.findall(r'\b(\d{3,4})\b', cleaned)
+        alt_matches = re.findall(r'\b(\d{2,4})\b', cleaned)
         for val in alt_matches:
             v = int(val)
-            if 200 <= v <= 3500:
+            if 25 <= v <= 3500:
                 price = v
                 break
 
@@ -309,7 +311,6 @@ def build_briefing_message(items):
     next_weekend = upcoming[0][1] if upcoming else items[0]
     cheapest_overall = items[0]
 
-    # حساب أفضل صفقة مع حقيبة شحن (20 كجم)
     items_with_bags = sorted(
         items,
         key=lambda it: it["السعر"] + BAGGAGE_FEES.get(it["الناقل"], 140)
@@ -317,10 +318,9 @@ def build_briefing_message(items):
     best_with_bag = items_with_bags[0]
     best_bag_price = best_with_bag["السعر"] + BAGGAGE_FEES.get(best_with_bag["الناقل"], 140)
 
-    # مؤشر توصية الشراء
     min_p = cheapest_overall["السعر"]
     if min_p <= 360:
-        advice = "🟢 <b>توصية الرادار:</b> الأسعار حالياً في <b>القاع التاريخي (358 ر.س)</b>. فرصة ممتازة لتأكيد الحجوزات الآن."
+        advice = "🟢 <b>توصية الرادار:</b> الأسعار حالياً في <b>القاع التاريخي (358 ر.س أو أقل)</b>. فرصة ممتازة لتأكيد الحجوزات الآن."
     elif min_p <= 420:
         advice = "🟡 <b>توصية الرادار:</b> الأسعار معتدلة ومناسبة للحجز."
     else:
@@ -429,10 +429,10 @@ def run_cloud_scan():
                 # صائد العروض الخاطفة (Flash Sale Sniffer)
                 prev_p = history.get(flight_key)
                 is_deep_drop = prev_p and (prev_p - cur_p >= 70)
-                is_rock_bottom = cur_p <= 310
+                is_rock_bottom = cur_p <= 260
 
                 if is_deep_drop or is_rock_bottom:
-                    reason = f"📉 هبوط حاد بمقدار {prev_p - cur_p} ر.س!" if is_deep_drop else "🔥 كسر سعر القاع التاريخي (أقل من 310 ر.س)!"
+                    reason = f"📉 هبوط حاد بمقدار {prev_p - cur_p} ر.س!" if is_deep_drop else "🔥 كسر سعر القاع التاريخي (أقل من 260 ر.س)!"
                     flash_msg = (
                         f"⚡🚨 <b>عرض ترويجي خاطف (رصد سحابي 24/7)</b>\n\n"
                         f"🗓 <b>{trip_type}</b>\n"
@@ -467,7 +467,6 @@ def run_cloud_scan():
         sync_to_google_sheets(results)
         df = pd.DataFrame(results)
 
-        # تحديد ما إذا كان يجب إرسال النشرة الصباحية أو تقرير التشغيل اليدوي
         ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
         is_morning_window = (8 <= ksa_now.hour < 10)
