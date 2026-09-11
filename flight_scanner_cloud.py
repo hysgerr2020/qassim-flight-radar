@@ -32,6 +32,7 @@ HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
 CHART_IMAGE_PATH = "flight_price_chart.png"
 
+# تكلفة حقيبة الشحن التقديرية (20 كجم ذهاب وعودة)
 BAGGAGE_FEES = {
     "طيران أديل": 140,
     "طيران ناس": 150,
@@ -40,21 +41,40 @@ BAGGAGE_FEES = {
 
 
 def load_history():
+    """تحميل سجل الأسعار وسجل التنبيهات بطريقة متوافقة وسلسة"""
+    default_state = {"prices": {}, "alerts": {}}
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, dict):
+                    # التوافق مع الإصدارات السابقة إذا كانت مفاتيح مباشرة
+                    if "prices" not in data:
+                        return {"prices": data, "alerts": {}}
+                    return data
         except Exception:
             pass
-    return {}
+    return default_state
 
 
-def save_history(hist):
+def save_history(hist_data):
     try:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(hist, f, ensure_ascii=False, indent=2)
+            json.dump(hist_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ فشل حفظ السجل التاريخي: {e}")
+
+
+def get_direct_booking_link(airline, dep, ret):
+    """توليد رابط الحجز المباشر لموقع شركة الطيران مع التواريخ"""
+    air = airline or ""
+    if "أديل" in air or "flyadeal" in air.lower():
+        return f"https://www.flyadeal.com/ar/search-flight?origin=ELQ&destination=JED&departureDate={dep}&returnDate={ret}&adults=1&tripType=RoundTrip"
+    elif "ناس" in air or "flynas" in air.lower():
+        return f"https://www.flynas.com/ar/booking/flight-search?origin=ELQ&destination=JED&departureDate={dep}&returnDate={ret}&adults=1&tripType=RoundTrip"
+    elif "السعودية" in air or "saudia" in air.lower():
+        return f"https://www.saudia.com/ar/booking?origin=ELQ&destination=JED&departureDate={dep}&returnDate={ret}&adults=1&tripType=RoundTrip"
+    return f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=ar&gl=sa"
 
 
 def send_telegram_msg(message, reply_markup=None, high_priority=False):
@@ -322,6 +342,9 @@ def build_briefing_message(items):
     t_next = f" | ⏰ {next_weekend['وقت الإقلاع']}" if next_weekend.get("وقت الإقلاع") else ""
     t_cheap = f" | ⏰ {cheapest_overall['وقت الإقلاع']}" if cheapest_overall.get("وقت الإقلاع") else ""
 
+    direct_next = get_direct_booking_link(next_weekend['الناقل'], next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'])
+    direct_cheap = get_direct_booking_link(cheapest_overall['الناقل'], cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'])
+
     ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
     text = (
         f"☀️ <b>النشرة الذكية لأسعار طيران (القصيم ⇄ جدة)</b>\n"
@@ -330,11 +353,11 @@ def build_briefing_message(items):
         f"   🗓 <b>{next_weekend['نوع العطلة']}</b>{t_next}\n"
         f"   🛫 ذهاب: <code>{next_weekend['تاريخ الذهاب']}</code> ⬅ عودة: <code>{next_weekend['تاريخ العودة']}</code>\n"
         f"   💰 <b>السعر الإجمالي:</b> <b>{next_weekend['السعر']} ر.س</b> — ✈️ {next_weekend['الناقل']}\n"
-        f"   🔗 <a href='{next_weekend['الرابط']}'>حجز أقرب رحلة ↗</a>\n\n"
+        f"   ✈️ <a href='{direct_next}'>حجز مباشر من موقع {next_weekend['الناقل']} ↗</a>\n\n"
         f"🎒 <b>2. أرخص تذكرة خفيفة (بدون شحن):</b>\n"
         f"   💰 <b>{cheapest_overall['السعر']} ر.س إجمالي</b> ({cheapest_overall['نوع العطلة']})\n"
         f"   ✈️ {cheapest_overall['الناقل']}{t_cheap}\n"
-        f"   🔗 <a href='{cheapest_overall['الرابط']}'>حجز تذكرة القاع ↗</a>\n\n"
+        f"   ✈️ <a href='{direct_cheap}'>حجز تذكرة القاع مباشرة ↗</a>\n\n"
         f"🧳 <b>3. أفضل صفقة شاملة حقيبة شحن (20kg):</b>\n"
         f"   💰 <b>{best_bag_price} ر.س إجمالي</b> — ✈️ {best_with_bag['الناقل']}\n"
         f"   🗓 {best_with_bag['نوع العطلة']} (<code>{best_with_bag['تاريخ الذهاب']}</code>)\n\n"
@@ -346,10 +369,13 @@ def build_briefing_message(items):
 
 def run_cloud_scan():
     start_time = time.time()
-    print("☁️ بدء تشغيل الرادار السحابي عبر GitHub Actions 24/7...")
+    now_ts = int(start_time)
+    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان التلقائي 24/7...")
     pairs = get_all_monitored_pairs(months_ahead=3)
     results = []
-    history = load_history()
+    hist_state = load_history()
+    price_history = hist_state.get("prices", {})
+    alert_history = hist_state.get("alerts", {})
 
     try:
         with sync_playwright() as p:
@@ -421,26 +447,51 @@ def run_cloud_scan():
                     flight_key = f"{dep}_{ret}"
                     print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
-                    # صائد العروض الخاطفة الحقيقي
-                    prev_p = history.get(flight_key)
-                    is_deep_drop = prev_p and (prev_p - cur_p >= 70)
-                    is_rock_bottom = cur_p <= 260
+                    # ==========================================
+                    # 🎯 محرك صائد القيعان والهبوط الذكي
+                    # ==========================================
+                    prev_p = price_history.get(flight_key)
+                    last_alert = alert_history.get(flight_key, {})
+                    last_alert_p = last_alert.get("price", 9999)
+                    last_alert_ts = last_alert.get("time", 0)
 
+                    # شروط التنبيه:
+                    # 1. هبوط حاد بمقدار 60 ر.س فأكثر عن الفحص السابق
+                    is_deep_drop = prev_p and (prev_p - cur_p >= 60)
+                    # 2. بلوغ سعر القاع التاريخي الترويجي (358 ر.س أو أقل)
+                    is_rock_bottom = cur_p <= 358
+
+                    # شرط التبريد (Smart Cooldown):
+                    # نرسل التنبيه إذا كان السعر أقل من آخر تنبيه أرسلناه، أو مر 24 ساعة على الأقل
+                    should_alert = False
                     if is_deep_drop or is_rock_bottom:
-                        reason = f"📉 هبوط حاد بمقدار {prev_p - cur_p} ر.س!" if is_deep_drop else "🔥 كسر سعر القاع التاريخي (أقل من 260 ر.س)!"
+                        if cur_p < last_alert_p:
+                            should_alert = True
+                        elif (now_ts - last_alert_ts) >= 86400:  # 24 ساعة
+                            should_alert = True
+
+                    if should_alert:
+                        if is_deep_drop:
+                            reason = f"📉 هبوط استثنائي مفاجئ بمقدار <b>{prev_p - cur_p} ر.س</b>!"
+                        else:
+                            reason = "🔥 <b>بلوغ سعر القاع التاريخي الترويجي (358 ر.س أو أقل)!</b>"
+
+                        direct_url = get_direct_booking_link(air, dep, ret)
                         flash_msg = (
-                            f"⚡🚨 <b>عرض ترويجي خاطف (رصد سحابي 24/7)</b>\n\n"
+                            f"⚡🚨 <b>صائد القيعان التلقائي (اقتناص صفقة عاجلة)</b>\n\n"
                             f"🗓 <b>{trip_type}</b>\n"
                             f"🛫 <b>الذهاب:</b> <code>{dep}</code> (⏰ {f_time})\n"
                             f"🛬 <b>العودة:</b> <code>{ret}</code>\n"
                             f"✈️ <b>الناقل:</b> {air}\n"
                             f"💰 <b>السعر الإجمالي:</b> <b>{cur_p} ر.س فقط!</b>\n"
-                            f"📢 <b>السبب:</b> {reason}\n\n"
-                            f"🔗 <a href='{url}'>اضغط هنا لحجز العرض فوراً ↗</a>"
+                            f"📢 <b>نوع التنبيه:</b> {reason}\n\n"
+                            f"✈️ <a href='{direct_url}'><b>حجز مباشر من موقع {air} فوراً ↗</b></a>\n"
+                            f"🔍 <a href='{url}'>فحص ومقارنة على Google Flights ↗</a>"
                         )
                         send_telegram_msg(flash_msg, high_priority=True)
+                        alert_history[flight_key] = {"price": cur_p, "time": now_ts}
 
-                    history[flight_key] = cur_p
+                    price_history[flight_key] = cur_p
                     results.append({
                         "نوع العطلة": trip_type,
                         "تاريخ الذهاب": dep,
@@ -456,29 +507,22 @@ def run_cloud_scan():
             browser.close()
 
     except Exception as fatal_e:
-        err_detail = traceback.format_exc()[-300:]
         print(f"❌ خطأ جسيم في تشغيل المتصفح: {fatal_e}")
         send_telegram_msg(
             f"⚠️🚨 <b>تنبيه عطل طارئ في رادار الطيران السحابي</b>\n\n"
             f"فشلت دورة الفحص في خوادم GitHub Actions:\n"
-            f"<code>{fatal_e}</code>\n\n"
-            f"يرجى مراجعة إعدادات المستودع أو سير العمل.",
+            f"<code>{fatal_e}</code>",
             high_priority=True
         )
         raise fatal_e
 
     duration = round(time.time() - start_time, 1)
-    save_history(history)
+    hist_state["prices"] = price_history
+    hist_state["alerts"] = alert_history
+    save_history(hist_state)
 
-    # التحقق من الفشل الصامت (عدم وجود نتائج على الإطلاق)
     if not results:
-        warning_msg = (
-            "⚠️🚨 <b>تحذير رادار الطيران:</b>\n\n"
-            "اكتملت دورة الفحص ولكن <b>لم يتم رصد أي رحلة (0 نتائج)</b>!\n"
-            "قد يكون ذلك بسبب تغيير في عناصر صفحة Google Flights أو حجب مؤقت من السيرفر."
-        )
-        send_telegram_msg(warning_msg, high_priority=True)
-        print("⚠️ تم إرسال تنبيه الفشل الصامت للتيليجرام.")
+        send_telegram_msg("⚠️🚨 تحذير: اكتملت دورة الفحص ولكن لم يتم رصد أي رحلة (0 نتائج)!", high_priority=True)
     else:
         results = sorted(results, key=lambda x: x["السعر"])
         sync_to_google_sheets(results, duration)
@@ -489,18 +533,15 @@ def run_cloud_scan():
         is_morning_window = (8 <= ksa_now.hour < 10)
 
         if is_manual_trigger or is_morning_window:
-            print("📢 إرسال التقرير الشامل والمخطط البياني للتيليجرام...")
             generate_price_chart(results)
             briefing_text = build_briefing_message(results)
-
             if os.path.exists(CHART_IMAGE_PATH):
                 caption = f"📈 <b>مخطط حركة أسعار (القصيم ⇄ جدة)</b>\n• أديل (أخضر) | السعودية (كحلي) | ناس (ذهبي)"
                 send_telegram_photo(CHART_IMAGE_PATH, caption=caption)
-
             send_telegram_msg(briefing_text)
 
         df.to_excel(EXCEL_FILE, index=False)
-        print(f"✅ اكتملت الدورة السحابية بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة حقيقية.")
+        print(f"✅ اكتملت الدورة السحابية وصيد القيعان بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة.")
 
 
 if __name__ == "__main__":
