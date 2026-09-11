@@ -540,7 +540,68 @@ def run_custom_date_probe(dep, ret):
     send_telegram_msg("\n".join(lines), high_priority=True)
     print("✅ تم إرسال تقرير الفحص المخصص للتيليجرام بنجاح!")
 
+def analyze_price_prediction(cur_p, dep_date_str, prev_p=None):
+    """
+    محرك التنبؤ الاحتمالي وحساب مؤشر الثقة في قرار الشراء (0 - 100%) وتوقع مسار 7 أيام
+    """
+    try:
+        dep_date = datetime.datetime.strptime(dep_date_str, "%Y-%m-%d").date()
+        days_to_dep = (dep_date - datetime.date.today()).days
+    except Exception:
+        days_to_dep = 30
 
+    # 1. معايرة السعر مقارنة بقيعان خط (القصيم ⇄ جدة)
+    if cur_p <= 358:
+        base_score = 96
+        forecast = "السعر في القاع التاريخي المطلق. غير قابل لمزيد من الهبوط وفرصة الشراء مثالية."
+        rec = "احجز فوراً (قاع تاريخي)"
+        level = "high"
+    elif cur_p <= 420:
+        base_score = 86
+        forecast = "سعر اقتصادي منخفض ومناسب جداً، مرشح للاستقرار أو الارتفاع الطفيف."
+        rec = "سعر ممتاز للشراء"
+        level = "high"
+    elif cur_p <= 550:
+        if days_to_dep > 21:
+            base_score = 55
+            forecast = "سعر متوسط. توجد مهلة زمنية كافية لترقب عروض ترويجية بديلة."
+            rec = "راقب وانتظر فرصة أفضل"
+            level = "medium"
+        else:
+            base_score = 76
+            forecast = "موعد السفر يقترب (< 3 أسابيع). احتمال ارتفاع السعر يفوق احتمال هبوطه."
+            rec = "يُفضل تأكيد الحجز قريباً"
+            level = "medium"
+    else:
+        base_score = 28
+        forecast = "أسعار فئات الحجز مرتفعة حالياً. ينصح بعدم الشراء إلا للضرورة القصوى."
+        rec = "سعر متضخم - انتظر هبوط الفئات"
+        level = "low"
+
+    # 2. تعديل النتيجة بحسب وتيرة تغير السعر (Price Velocity)
+    if prev_p:
+        if cur_p < prev_p:
+            base_score = min(99, base_score + 6)
+        elif cur_p > prev_p:
+            if days_to_dep <= 14:
+                base_score = min(95, base_score + 8)
+                forecast = "⚠️ تحذير: وتيرة تصاعدية ملحوظة؛ المقاعد الاقتصادية أوشكت على النفاد."
+            else:
+                base_score = max(15, base_score - 8)
+
+    # 3. تأثير مهلة اللحظات الأخيرة (Last-Minute Volatility)
+    if days_to_dep <= 7 and cur_p <= 500:
+        base_score = min(98, base_score + 8)
+    elif days_to_dep <= 3:
+        forecast = "⏳ رحلة الأسبوع الحالي: التسعير ديناميكي متسارع والمقاعد في نهايتها."
+
+    final_score = max(10, min(99, int(base_score)))
+    return {
+        "score": final_score,
+        "recommendation": rec,
+        "forecast": forecast,
+        "level": level
+    }
 def run_cloud_scan():
     if CUSTOM_DEP and CUSTOM_RET:
         run_custom_date_probe(CUSTOM_DEP, CUSTOM_RET)
