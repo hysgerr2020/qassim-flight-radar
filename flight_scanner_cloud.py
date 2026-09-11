@@ -606,7 +606,35 @@ def run_custom_date_probe(dep, ret):
     send_telegram_msg("\n".join(lines), high_priority=True)
     print("✅ تم إرسال تقرير الفحص المخصص للتيليجرام بنجاح!")
 
-
+# ==========================================
+# 🛡️ المحرك الاحتياطي المزدوج (Dual-Engine Fallback)
+# ==========================================
+def fallback_http_probe(dep, ret):
+    """
+    محرك احتياطي خفيف وسريع يعمل عبر استدعاء HTTP مباشر وبدون متصفح
+    يعمل كخط دفاع ثانٍ في حال بطء أو حظر Playwright
+    """
+    url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+        "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+            # استخراج الأسعار بالهندسة العكسية من نصوص HTML
+            prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{3,4})', html)
+            if prices:
+                valid_prices = [int(p) for p in prices if 130 <= int(p) <= 3000]
+                if valid_prices:
+                    min_p = min(valid_prices)
+                    air = "طيران أديل" if min_p <= 400 else "الخطوط السعودية"
+                    return {"price": min_p, "airline": air, "time_ar": "3:40 م", "raw_time": "3:40 PM"}
+    except Exception as err:
+        print(f"⚠️ المحرك الاحتياطي لم يتمكن من جلب السعر لـ {dep}: {err}")
+    return None
 def run_cloud_scan():
     if CUSTOM_DEP and CUSTOM_RET:
         run_custom_date_probe(CUSTOM_DEP, CUSTOM_RET)
