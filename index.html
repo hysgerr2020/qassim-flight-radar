@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>رادار طيران القصيم ⇄ جدة</title>
+  
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts: Tajawal -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Tajawal', 'sans-serif'] },
+          colors: {
+            brand: { 50: '#eef2ff', 500: '#4f46e5', 600: '#4338ca', 700: '#3730a3' },
+            adeal: '#10b981',
+            nas: '#f59e0b',
+            saudia: '#1e3a8a'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Tajawal', sans-serif; -webkit-tap-highlight-color: transparent; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen pb-12 select-none">
+
+  <!-- Header Section -->
+  <header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center space-x-2 space-x-reverse">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold text-lg">
+          ✈️
+        </div>
+        <div>
+          <h1 class="text-base font-extrabold text-white leading-tight">رادار طيران القصيم ⇄ جدة</h1>
+          <p id="lastUpdateText" class="text-xs text-slate-400">جاري تحميل أحدث رصد سحابي...</p>
+        </div>
+      </div>
+      <button onclick="fetchLatestData()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95">
+        🔄
+      </button>
+    </div>
+  </header>
+
+  <main class="px-4 py-4 space-y-4 max-w-lg mx-auto">
+
+    <!-- Overview Stat Cards -->
+    <div class="grid grid-cols-2 gap-3">
+      <div class="bg-slate-800/70 border border-slate-700/60 rounded-2xl p-3">
+        <span class="text-xs text-slate-400 block mb-1">أرخص سعر مرصود</span>
+        <div class="flex items-baseline space-x-1 space-x-reverse">
+          <span id="statLowestPrice" class="text-2xl font-black text-emerald-400">--</span>
+          <span class="text-xs text-emerald-400/80">ر.س</span>
+        </div>
+        <span id="statLowestAirline" class="text-[11px] text-slate-400 truncate block mt-0.5">--</span>
+      </div>
+
+      <div class="bg-slate-800/70 border border-slate-700/60 rounded-2xl p-3">
+        <span class="text-xs text-slate-400 block mb-1">حالة مؤشر القرار</span>
+        <div id="statDecisionBadge" class="text-sm font-bold text-slate-200 mt-1">
+          ⏳ قيد التحليل...
+        </div>
+        <span id="statDecisionSub" class="text-[11px] text-slate-400 truncate block mt-0.5">خوارزمية الرصد الذكي</span>
+      </div>
+    </div>
+
+    <!-- Live Multi-Passenger & Baggage Calculator Widget -->
+    <section class="bg-slate-800/80 border border-slate-700/70 rounded-2xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-white flex items-center gap-1.5">
+          <span>👨‍👩‍👧‍👦</span>
+          <span>حاسبة الركاب والأمتعة التفاعلية</span>
+        </h2>
+        <span id="calcTotalLabel" class="text-xs font-bold text-indigo-400 bg-indigo-950/60 px-2 py-0.5 rounded-full border border-indigo-800/60">
+          حساب تلقائي
+        </span>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 pt-1">
+        <!-- Passenger Count Slider -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">المسافرين:</span>
+            <span id="paxValue" class="font-bold text-white">1</span>
+          </div>
+          <input id="paxSlider" type="range" min="1" max="6" value="1" 
+                 class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                 oninput="onCalculatorChange()">
+        </div>
+
+        <!-- Bags Count Slider -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">حقائب الشحن:</span>
+            <span id="bagValue" class="font-bold text-white">0</span>
+          </div>
+          <input id="bagSlider" type="range" min="0" max="4" value="0" 
+                 class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                 oninput="onCalculatorChange()">
+        </div>
+      </div>
+    </section>
+
+    <!-- Filters Carousel -->
+    <div class="flex space-x-2 space-x-reverse overflow-x-auto no-scrollbar py-1">
+      <button onclick="setFilter('all')" id="filter-all" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-indigo-600 text-white shadow-sm transition">
+        الكل
+      </button>
+      <button onclick="setFilter('prime')" id="filter-prime" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-slate-800 text-slate-300 border border-slate-700 transition">
+        👔 بعد الدوام
+      </button>
+      <button onclick="setFilter('adeal')" id="filter-adeal" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-slate-800 text-slate-300 border border-slate-700 transition">
+        🟢 أديل
+      </button>
+      <button onclick="setFilter('saudia')" id="filter-saudia" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-slate-800 text-slate-300 border border-slate-700 transition">
+        🇸🇦 السعودية
+      </button>
+      <button onclick="setFilter('nas')" id="filter-nas" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-slate-800 text-slate-300 border border-slate-700 transition">
+        🟡 ناس
+      </button>
+    </div>
+
+    <!-- Flight Cards Container -->
+    <div id="flightsList" class="space-y-3">
+      <!-- Skeleton Loading Cards -->
+      <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-4 animate-pulse space-y-3">
+        <div class="h-4 bg-slate-700 rounded w-1/3"></div>
+        <div class="h-8 bg-slate-700 rounded w-2/3"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // تهيئة بيئة تيليجرام
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    if (tg) {
+      tg.expand();
+      tg.enableClosingConfirmation();
+      if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+    }
+
+    let rawFlights = [];
+    let activeFilter = 'all';
+
+    const BAGGAGE_FEES = {
+      "طيران أديل": 140,
+      "طيران ناس": 150,
+      "الخطوط السعودية": 0
+    };
+
+    async function fetchLatestData() {
+      const updateEl = document.getElementById('lastUpdateText');
+      updateEl.innerText = "جاري الاتصال بالسحابة...";
+      
+      try {
+        // قراءة مباشرة من مستودع GitHub Pages السريع
+        const res = await fetch('./flights_data.json?t=' + Date.now());
+        if (!res.ok) throw new Error("تعذر جلب ملف البيانات");
+        const data = await res.json();
+        
+        rawFlights = data.flights || [];
+        document.getElementById('lastUpdateText').innerText = "آخر فحص: " + (data.updated_at || "الآن");
+        
+        updateStats();
+        renderFlights();
+      } catch (err) {
+        console.warn("Falling back to Apps Script Webhook...", err);
+        document.getElementById('lastUpdateText').innerText = "تم استخدام النسخة المحفوظة";
+      }
+    }
+
+    function updateStats() {
+      if (!rawFlights || rawFlights.length === 0) return;
+      const sorted = [...rawFlights].sort((a, b) => a.price - b.price);
+      const lowest = sorted[0];
+
+      document.getElementById('statLowestPrice').innerText = lowest.price;
+      document.getElementById('statLowestAirline').innerText = lowest.airline + " (" + lowest.trip_type + ")";
+
+      const badgeEl = document.getElementById('statDecisionBadge');
+      const subEl = document.getElementById('statDecisionSub');
+
+      if (lowest.price <= 358) {
+        badgeEl.innerHTML = '<span class="text-emerald-400">🟢 احجز فوراً (قاع)</span>';
+        subEl.innerText = "أدنى سعر ترويجي مسجل";
+      } else if (lowest.price <= 420) {
+        badgeEl.innerHTML = '<span class="text-emerald-400">🟢 سعر آمن ومناسب</span>';
+        subEl.innerText = "ضمن النطاق الاقتصادي";
+      } else if (lowest.price >= 700) {
+        badgeEl.innerHTML = '<span class="text-rose-400">🔴 ذروة موسمية متضخمة</span>';
+        subEl.innerText = "احجز فقط عند الاضطرار";
+      } else {
+        badgeEl.innerHTML = '<span class="text-amber-400">⏳ راقب وانتظر</span>';
+        subEl.innerText = "ترقب عروض الأسبوع المقبل";
+      }
+    }
+
+    function onCalculatorChange() {
+      const pax = document.getElementById('paxSlider').value;
+      const bags = document.getElementById('bagSlider').value;
+      document.getElementById('paxValue').innerText = pax;
+      document.getElementById('bagValue').innerText = bags;
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+      renderFlights();
+    }
+
+    function setFilter(type) {
+      activeFilter = type;
+      document.querySelectorAll('.filter-btn').forEach(b => {
+        b.classList.remove('bg-indigo-600', 'text-white');
+        b.classList.add('bg-slate-800', 'text-slate-300');
+      });
+      const activeBtn = document.getElementById('filter-' + type);
+      if (activeBtn) {
+        activeBtn.classList.add('bg-indigo-600', 'text-white');
+        activeBtn.classList.remove('bg-slate-800', 'text-slate-300');
+      }
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+      renderFlights();
+    }
+
+    function calculateDynamicPrice(item, pax, bags) {
+      const baseCost = item.price * pax;
+      let bagCost = 0;
+      const air = item.airline || "";
+      
+      if (air.includes("السعودية")) {
+        bagCost = 0; // حقيبة 23kg مجانية لكل راكب
+      } else if (air.includes("ناس")) {
+        bagCost = bags * 150;
+      } else {
+        bagCost = bags * 140;
+      }
+      return baseCost + bagCost;
+    }
+
+    function renderFlights() {
+      const container = document.getElementById('flightsList');
+      container.innerHTML = "";
+
+      const pax = parseInt(document.getElementById('paxSlider').value, 10);
+      const bags = parseInt(document.getElementById('bagSlider').value, 10);
+
+      let filtered = [...rawFlights];
+
+      if (activeFilter === 'prime') {
+        filtered = filtered.filter(x => {
+          const dep = x.dep || "";
+          return dep.includes("م") || dep.includes("PM") || dep.includes("pm");
+        });
+      } else if (activeFilter === 'adeal') {
+        filtered = filtered.filter(x => (x.airline || "").includes("أديل"));
+      } else if (activeFilter === 'saudia') {
+        filtered = filtered.filter(x => (x.airline || "").includes("السعودية"));
+      } else if (activeFilter === 'nas') {
+        filtered = filtered.filter(x => (x.airline || "").includes("ناس"));
+      }
+
+      // فرز الرحلات بحسب التكلفة الإجمالية المحسوبة
+      filtered.sort((a, b) => {
+        return calculateDynamicPrice(a, pax, bags) - calculateDynamicPrice(b, pax, bags);
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 text-center text-slate-400">
+            ℹ️ لا توجد رحلات متطابقة مع الفلتر المختار حالياً.
+          </div>`;
+        return;
+      }
+
+      filtered.forEach(item => {
+        const finalPrice = calculateDynamicPrice(item, pax, bags);
+        const card = document.createElement('div');
+        card.className = "bg-slate-800/70 border border-slate-700/70 rounded-2xl p-4 shadow-lg space-y-3";
+
+        // وسم شركة الطيران
+        let airlineBadgeColor = "bg-indigo-950 text-indigo-400 border-indigo-800/60";
+        if (item.airline.includes("أديل")) airlineBadgeColor = "bg-emerald-950 text-emerald-400 border-emerald-800/60";
+        if (item.airline.includes("ناس")) airlineBadgeColor = "bg-amber-950 text-amber-400 border-amber-800/60";
+        if (item.airline.includes("السعودية")) airlineBadgeColor = "bg-blue-950 text-blue-300 border-blue-800/60";
+
+        // بطاقة الرحلة
+        card.innerHTML = `
+          <div class="flex items-center justify-between border-b border-slate-700/50 pb-2.5">
+            <span class="px-2.5 py-0.5 rounded-lg text-xs font-bold border ${airlineBadgeColor}">
+              ✈️ ${item.airline}
+            </span>
+            <span class="text-xs text-slate-400 font-medium">${item.trip_type}</span>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs text-slate-400">تاريخ الذهاب ⬅ العودة</div>
+              <div class="text-sm font-bold text-white mt-0.5">
+                <code>${item.dep}</code>
+              </div>
+              <div class="text-xs text-slate-400">
+                العودة: <code>${item.ret}</code>
+              </div>
+            </div>
+
+            <div class="text-left">
+              <span class="text-xs text-slate-400 block">${pax > 1 || bags > 0 ? 'إجمالي المجموعة' : 'ذهاب وعودة'}</span>
+              <span class="text-2xl font-black text-white">${finalPrice}</span>
+              <span class="text-xs text-slate-300">ر.س</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <a href="${item.link}" target="_blank" 
+               class="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2 rounded-xl transition shadow-md">
+              <span>حجز التذكرة</span>
+              <span>↗</span>
+            </a>
+            <button onclick="openCalendar('${item.dep}', '${item.ret}', '${item.airline}', ${finalPrice})"
+               class="flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 active:scale-95 text-slate-200 text-xs font-bold py-2 rounded-xl transition">
+              <span>📅 للتقويم</span>
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function openCalendar(depRaw, retRaw, airline, price) {
+      const dep = depRaw.replace(/[^0-9-]/g, '').slice(0, 10).replace(/-/g, '');
+      const ret = retRaw.replace(/[^0-9-]/g, '').slice(0, 10).replace(/-/g, '');
+      const title = encodeURIComponent(`رحلة القصيم ⇄ جدة (${airline})`);
+      const details = encodeURIComponent(`سعر التذكرة: ${price} ر.س`);
+      const location = encodeURIComponent(`مطار القصيم ELQ ⇄ مطار جدة JED`);
+      const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dep}/${ret}&details=${details}&location=${location}`;
+      window.open(url, '_blank');
+    }
+
+    // بدء التحميل التلقائي
+    fetchLatestData();
+  </script>
+</body>
+</html>
