@@ -46,19 +46,11 @@ jobs:
           CUSTOM_RET: ${{ inputs.custom_ret }}
         run: python flight_scanner_cloud.py
 
-      - name: حفظ السجلات التاريخية في المستودع
-        if: always()
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          - name: حفظ السجلات التاريخية في المستودع
+      - name: حفظ السجلات التاريخية في المستودع وتحديث بيانات الويب
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add flight_price_history.json google_flights_weekends.xlsx flights_data.json || true
           git commit -m "تحديث تلقائي: بيانات الرادار والتطبيق المصغر [skip ci]" || echo "لا توجد تعديلات لحفظها"
-          git push || echo "فشل دفع التعديلات"
-          git add flight_price_history.json google_flights_weekends.xlsx || true
-          git commit -m "تحديث تلقائي: سجل الأسعار التاريخي [skip ci]" || echo "لا توجد تعديلات لحفظها"
           git push || echo "فشل دفع التعديلات"
