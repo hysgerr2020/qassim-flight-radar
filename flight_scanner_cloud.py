@@ -5,6 +5,7 @@ import os
 import random
 import re
 import time
+import traceback
 import urllib.parse
 import urllib.request
 import pandas as pd
@@ -102,14 +103,17 @@ def send_telegram_photo(photo_path, caption=""):
         print(f"⚠️ فشل إرسال صورة الرسم البياني: {e}")
 
 
-def sync_to_google_sheets(results):
+def sync_to_google_sheets(results, execution_time_sec):
     if not GOOGLE_SHEET_WEBHOOK_URL.startswith("http"):
         print(f"⚠️ رابط الويب هوك غير صالح: {GOOGLE_SHEET_WEBHOOK_URL}")
         return
 
-    ksa_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=3)).strftime("%Y-%m-%d %I:%M %p")
+    ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
     payload_data = {
-        "updated_at": f"{ksa_time} (توقيت مكة)",
+        "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
+        "raw_timestamp": int(ksa_now.timestamp()),
+        "scan_duration_sec": execution_time_sec,
+        "flight_count": len(results),
         "flights": [
             {
                 "trip_type": item["نوع العطلة"],
@@ -192,7 +196,6 @@ def parse_airline_name(text):
 
 
 def parse_flight_card_text(text):
-    # 1. استخراج وقت الإقلاع
     time_ar = ""
     raw_time = ""
     m_time = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', text)
@@ -200,18 +203,14 @@ def parse_flight_card_text(text):
         raw_time = m_time.group(1).strip()
         time_ar = raw_time.replace("AM", "ص").replace("PM", "م").replace("am", "ص").replace("pm", "م")
 
-    # 2. خطوة الأمان الحيوية: شطب جميع التوقيتات والمدد وأوزان الحقائب من النص تماماً
-    # هذا يمنع نهائياً قراءة الدقيقة "25" من الساعة "8:25" كسعر!
     cleaned = re.sub(r'\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?', '', text)
     cleaned = re.sub(r'\d+\s*(?:hr|h|min|m|ساعة|دقيقة|kg|كجم|co2e?).*', '', cleaned, flags=re.IGNORECASE)
 
     price = None
-    # 3. قبول السعر فقط إذا كان مقترناً حصراً برمز العملة (SAR / ر.س / ريال)
     matches = re.findall(r'(?:sar|ر\.س|ريال|sr)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال|sr)', cleaned, re.IGNORECASE)
     for m1, m2 in matches:
         raw_val = m1 if m1 else m2
         v = int(raw_val.replace(',', ''))
-        # حد الأمان المنطقي لتذكرة ذهاب وعودة إجمالية: بين 130 و 4000 ر.س
         if 130 <= v <= 4000:
             price = v
             break
@@ -346,119 +345,143 @@ def build_briefing_message(items):
 
 
 def run_cloud_scan():
+    start_time = time.time()
     print("☁️ بدء تشغيل الرادار السحابي عبر GitHub Actions 24/7...")
     pairs = get_all_monitored_pairs(months_ahead=3)
     results = []
     history = load_history()
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
-        )
-        context = browser.new_context(
-            locale="en-US",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            viewport={"width": 1366, "height": 768}
-        )
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
+            )
+            context = browser.new_context(
+                locale="en-US",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                viewport={"width": 1366, "height": 768}
+            )
 
-        context.add_cookies([
-            {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"},
-            {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
-        ])
-        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        page = context.new_page()
+            context.add_cookies([
+                {"name": "SOCS", "value": "CAESHAgBEhJnd3NfMjAyNDA4MDctMF9SQzIaAmVuIAEaBgiA_L20Bg", "domain": ".google.com", "path": "/"},
+                {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
+            ])
+            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            page = context.new_page()
 
-        for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
-            url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
-            cheapest_flight = None
-
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=18000)
-
-                if "consent.google.com" in page.url:
-                    try:
-                        page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
-                        page.wait_for_load_state("domcontentloaded", timeout=6000)
-                    except Exception:
-                        pass
+            for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
+                url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
+                cheapest_flight = None
 
                 try:
-                    page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=4500)
+                    page.goto(url, wait_until="domcontentloaded", timeout=18000)
+
+                    if "consent.google.com" in page.url:
+                        try:
+                            page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
+                            page.wait_for_load_state("domcontentloaded", timeout=6000)
+                        except Exception:
+                            pass
+
+                    try:
+                        page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=4500)
+                    except Exception:
+                        time.sleep(1.5)
+
+                    cards = page.locator("li.pIav2d, div.pIav2d").all()
+                    nonstop_options = []
+
+                    for c in cards:
+                        txt = c.inner_text()
+                        if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
+                            price, airline, time_ar, raw_time = parse_flight_card_text(txt)
+                            if price:
+                                nonstop_options.append({
+                                    "price": price,
+                                    "airline": airline,
+                                    "time_ar": time_ar,
+                                    "raw_time": raw_time
+                                })
+
+                    if nonstop_options:
+                        if "جمعة إلى سبت" in trip_type:
+                            pm_options = [o for o in nonstop_options if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
+                            cheapest_flight = min(pm_options, key=lambda x: x["price"]) if pm_options else min(nonstop_options, key=lambda x: x["price"])
+                        else:
+                            cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
+
                 except Exception:
-                    time.sleep(1.5)
+                    pass
 
-                cards = page.locator("li.pIav2d, div.pIav2d").all()
-                nonstop_options = []
+                if cheapest_flight:
+                    cur_p = cheapest_flight["price"]
+                    air = cheapest_flight["airline"]
+                    f_time = cheapest_flight["time_ar"]
+                    flight_key = f"{dep}_{ret}"
+                    print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
-                for c in cards:
-                    txt = c.inner_text()
-                    if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
-                        price, airline, time_ar, raw_time = parse_flight_card_text(txt)
-                        if price:
-                            nonstop_options.append({
-                                "price": price,
-                                "airline": airline,
-                                "time_ar": time_ar,
-                                "raw_time": raw_time
-                            })
+                    # صائد العروض الخاطفة الحقيقي
+                    prev_p = history.get(flight_key)
+                    is_deep_drop = prev_p and (prev_p - cur_p >= 70)
+                    is_rock_bottom = cur_p <= 260
 
-                if nonstop_options:
-                    if "جمعة إلى سبت" in trip_type:
-                        pm_options = [o for o in nonstop_options if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
-                        cheapest_flight = min(pm_options, key=lambda x: x["price"]) if pm_options else min(nonstop_options, key=lambda x: x["price"])
-                    else:
-                        cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
+                    if is_deep_drop or is_rock_bottom:
+                        reason = f"📉 هبوط حاد بمقدار {prev_p - cur_p} ر.س!" if is_deep_drop else "🔥 كسر سعر القاع التاريخي (أقل من 260 ر.س)!"
+                        flash_msg = (
+                            f"⚡🚨 <b>عرض ترويجي خاطف (رصد سحابي 24/7)</b>\n\n"
+                            f"🗓 <b>{trip_type}</b>\n"
+                            f"🛫 <b>الذهاب:</b> <code>{dep}</code> (⏰ {f_time})\n"
+                            f"🛬 <b>العودة:</b> <code>{ret}</code>\n"
+                            f"✈️ <b>الناقل:</b> {air}\n"
+                            f"💰 <b>السعر الإجمالي:</b> <b>{cur_p} ر.س فقط!</b>\n"
+                            f"📢 <b>السبب:</b> {reason}\n\n"
+                            f"🔗 <a href='{url}'>اضغط هنا لحجز العرض فوراً ↗</a>"
+                        )
+                        send_telegram_msg(flash_msg, high_priority=True)
 
-            except Exception:
-                pass
+                    history[flight_key] = cur_p
+                    results.append({
+                        "نوع العطلة": trip_type,
+                        "تاريخ الذهاب": dep,
+                        "وقت الإقلاع": f_time,
+                        "تاريخ العودة": ret,
+                        "الناقل": air,
+                        "السعر": cur_p,
+                        "الرابط": url
+                    })
 
-            if cheapest_flight:
-                cur_p = cheapest_flight["price"]
-                air = cheapest_flight["airline"]
-                f_time = cheapest_flight["time_ar"]
-                flight_key = f"{dep}_{ret}"
-                print(f"[{idx}/{len(pairs)}] ✅ رصد حقيقي: {trip_type} -> {cur_p} ر.س ({air})")
+                time.sleep(random.uniform(0.5, 1.2))
 
-                # صائد العروض الخاطفة الحقيقي (خصم حقيقي لا يقل عن 70 ر.س أو قاع حقيقي تحت 260 ر.س)
-                prev_p = history.get(flight_key)
-                is_deep_drop = prev_p and (prev_p - cur_p >= 70)
-                is_rock_bottom = cur_p <= 260
+            browser.close()
 
-                if is_deep_drop or is_rock_bottom:
-                    reason = f"📉 هبوط حاد بمقدار {prev_p - cur_p} ر.س!" if is_deep_drop else "🔥 كسر سعر القاع التاريخي (أقل من 260 ر.س)!"
-                    flash_msg = (
-                        f"⚡🚨 <b>عرض ترويجي خاطف (رصد سحابي 24/7)</b>\n\n"
-                        f"🗓 <b>{trip_type}</b>\n"
-                        f"🛫 <b>الذهاب:</b> <code>{dep}</code> (⏰ {f_time})\n"
-                        f"🛬 <b>العودة:</b> <code>{ret}</code>\n"
-                        f"✈️ <b>الناقل:</b> {air}\n"
-                        f"💰 <b>السعر الإجمالي:</b> <b>{cur_p} ر.س فقط!</b>\n"
-                        f"📢 <b>السبب:</b> {reason}\n\n"
-                        f"🔗 <a href='{url}'>اضغط هنا لحجز العرض فوراً ↗</a>"
-                    )
-                    send_telegram_msg(flash_msg, high_priority=True)
+    except Exception as fatal_e:
+        err_detail = traceback.format_exc()[-300:]
+        print(f"❌ خطأ جسيم في تشغيل المتصفح: {fatal_e}")
+        send_telegram_msg(
+            f"⚠️🚨 <b>تنبيه عطل طارئ في رادار الطيران السحابي</b>\n\n"
+            f"فشلت دورة الفحص في خوادم GitHub Actions:\n"
+            f"<code>{fatal_e}</code>\n\n"
+            f"يرجى مراجعة إعدادات المستودع أو سير العمل.",
+            high_priority=True
+        )
+        raise fatal_e
 
-                history[flight_key] = cur_p
-                results.append({
-                    "نوع العطلة": trip_type,
-                    "تاريخ الذهاب": dep,
-                    "وقت الإقلاع": f_time,
-                    "تاريخ العودة": ret,
-                    "الناقل": air,
-                    "السعر": cur_p,
-                    "الرابط": url
-                })
-
-            time.sleep(random.uniform(0.5, 1.2))
-
-        browser.close()
-
+    duration = round(time.time() - start_time, 1)
     save_history(history)
 
-    if results:
+    # التحقق من الفشل الصامت (عدم وجود نتائج على الإطلاق)
+    if not results:
+        warning_msg = (
+            "⚠️🚨 <b>تحذير رادار الطيران:</b>\n\n"
+            "اكتملت دورة الفحص ولكن <b>لم يتم رصد أي رحلة (0 نتائج)</b>!\n"
+            "قد يكون ذلك بسبب تغيير في عناصر صفحة Google Flights أو حجب مؤقت من السيرفر."
+        )
+        send_telegram_msg(warning_msg, high_priority=True)
+        print("⚠️ تم إرسال تنبيه الفشل الصامت للتيليجرام.")
+    else:
         results = sorted(results, key=lambda x: x["السعر"])
-        sync_to_google_sheets(results)
+        sync_to_google_sheets(results, duration)
         df = pd.DataFrame(results)
 
         ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
@@ -475,11 +498,9 @@ def run_cloud_scan():
                 send_telegram_photo(CHART_IMAGE_PATH, caption=caption)
 
             send_telegram_msg(briefing_text)
-    else:
-        df = pd.DataFrame(columns=["نوع العطلة", "تاريخ الذهاب", "وقت الإقلاع", "تاريخ العودة", "الناقل", "السعر", "الرابط"])
 
-    df.to_excel(EXCEL_FILE, index=False)
-    print(f"✅ اكتملت الدورة السحابية بنجاح! تم رصد {len(results)} رحلة حقيقية.")
+        df.to_excel(EXCEL_FILE, index=False)
+        print(f"✅ اكتملت الدورة السحابية بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة حقيقية.")
 
 
 if __name__ == "__main__":
