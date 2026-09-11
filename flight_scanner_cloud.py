@@ -34,6 +34,7 @@ CUSTOM_RET = clean_env("CUSTOM_RET", "")
 HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
 CHART_IMAGE_PATH = "flight_price_chart.png"
+MINI_APP_DATA_FILE = "flights_data.json"
 
 BAGGAGE_FEES = {
     "طيران أديل": 140,
@@ -281,6 +282,73 @@ def parse_flight_card_text(text):
     return price, airline, time_ar, raw_time
 
 
+# ==========================================
+# 🔮 المسار الثاني: محرك التنبؤ الاحتمالي ومؤشر الثقة
+# ==========================================
+def analyze_price_prediction(cur_p, dep_date_str, prev_p=None):
+    """
+    محرك التنبؤ الذكي وحساب مؤشر الثقة في قرار الشراء (0 - 100%) وتوقع مسار السعر لـ 7 أيام
+    """
+    try:
+        dep_date = datetime.datetime.strptime(dep_date_str, "%Y-%m-%d").date()
+        days_to_dep = (dep_date - datetime.date.today()).days
+    except Exception:
+        days_to_dep = 30
+
+    # 1. المعايرة مع النطاقات التاريخية لخط (القصيم ⇄ جدة)
+    if cur_p <= 358:
+        base_score = 96
+        forecast = "السعر في القاع التاريخي الترويجي الأدنى. غير قابل لمزيد من الهبوط وفرصة الشراء مثالية."
+        rec = "احجز فوراً (قاع تاريخي)"
+        level = "high"
+    elif cur_p <= 420:
+        base_score = 87
+        forecast = "سعر اقتصادي منخفض ومناسب جداً، مرشح للاستقرار أو الارتفاع التدريجي."
+        rec = "سعر ممتاز للشراء"
+        level = "high"
+    elif cur_p <= 550:
+        if days_to_dep > 21:
+            base_score = 58
+            forecast = "سعر متوسط. توجد مهلة زمنية كافية (> 3 أسابيع) لترقب عروض ترويجية بديلة."
+            rec = "راقب وانتظر فرصة أفضل"
+            level = "medium"
+        else:
+            base_score = 78
+            forecast = "موعد السفر يقترب (< 3 أسابيع). احتمال ارتفاع السعر يفوق احتمال هبوطه."
+            rec = "يُفضل تأكيد الحجز قريباً"
+            level = "medium"
+    else:
+        base_score = 28
+        forecast = "فئات المقاعد الاقتصادية غير متوفرة حالياً. ينصح بعدم الشراء إلا للضرورة القصوى."
+        rec = "سعر متضخم - انتظر هبوط الفئات"
+        level = "low"
+
+    # 2. وتيرة تغير السعر (Price Velocity)
+    if prev_p:
+        if cur_p < prev_p:
+            base_score = min(99, base_score + 6)
+        elif cur_p > prev_p:
+            if days_to_dep <= 14:
+                base_score = min(95, base_score + 8)
+                forecast = "⚠️ وتيرة تصاعدية ملحوظة: المقاعد الاقتصادية أوشكت على النفاد."
+            else:
+                base_score = max(15, base_score - 8)
+
+    # 3. عامل اللحظات الأخيرة (Last-Minute Dynamic Pricing)
+    if days_to_dep <= 7 and cur_p <= 500:
+        base_score = min(98, base_score + 8)
+    elif days_to_dep <= 3:
+        forecast = "⏳ رحلة الأسبوع الحالي: التسعير متسارع والمقاعد المتبقية محدودة."
+
+    final_score = max(10, min(99, int(base_score)))
+    return {
+        "score": final_score,
+        "recommendation": rec,
+        "forecast": forecast,
+        "level": level
+    }
+
+
 def generate_price_chart(items):
     if not items:
         return False
@@ -395,10 +463,12 @@ def build_briefing_message(items):
         f"   🗓 <b>{next_weekend['نوع العطلة']}</b>{t_next}\n"
         f"   🛫 ذهاب: <code>{next_weekend['تاريخ الذهاب']}</code> ⬅ عودة: <code>{next_weekend['تاريخ العودة']}</code>\n"
         f"   💰 <b>السعر الإجمالي:</b> <b>{next_weekend['السعر']} ر.س</b> — ✈️ {next_weekend['الناقل']}\n"
+        f"   🎯 <b>مؤشر الثقة:</b> <b>{next_weekend.get('مؤشر_الثقة', 80)}%</b> ({next_weekend.get('توصية_القرار', 'سعر مناسب')})\n"
         f"   ✈️ <a href='{direct_next}'>حجز مباشر من موقع {next_weekend['الناقل']} ↗</a>\n\n"
         f"🎒 <b>2. أرخص تذكرة خفيفة (بدون شحن):</b>\n"
         f"   💰 <b>{cheapest_overall['السعر']} ر.س إجمالي</b> ({cheapest_overall['نوع العطلة']})\n"
         f"   ✈️ {cheapest_overall['الناقل']}{t_cheap}\n"
+        f"   🎯 <b>مؤشر الثقة:</b> <b>{cheapest_overall.get('مؤشر_الثقة', 95)}%</b>\n"
         f"   ✈️ <a href='{direct_cheap}'>حجز تذكرة القاع مباشرة ↗</a>\n\n"
         f"🧳 <b>3. أفضل صفقة شاملة حقيبة شحن (20kg):</b>\n"
         f"   💰 <b>{best_bag_price} ر.س إجمالي</b> — ✈️ {best_with_bag['الناقل']}\n"
@@ -427,23 +497,15 @@ def create_stealth_context(browser):
         {"name": "CONSENT", "value": "PENDING+999", "domain": ".google.com", "path": "/"}
     ])
 
-    # حقن سكريبتات إخفاء الآلية ومحاكاة العتاد
     stealth_js = f"""
-    // 1. إخفاء مؤشر التشغيل الآلي
     Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
-    
-    // 2. تزييف لغات المتصفح الطبيعية
     Object.defineProperty(navigator, 'languages', {{ get: () => ['ar-SA', 'ar', 'en-US', 'en'] }});
-    
-    // 3. تزييف كرت الشاشة الحقيقي لمنع كشف SwiftShader
     const getParameter = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function(parameter) {{
         if (parameter === 37445) return '{profile["vendor"]}';
         if (parameter === 37446) return '{profile["renderer"]}';
         return getParameter.apply(this, arguments);
     }};
-
-    // 4. محاكاة وجود إضافات المتصفح
     Object.defineProperty(navigator, 'plugins', {{ get: () => [1, 2, 3, 4, 5] }});
     """
     context.add_init_script(stealth_js)
@@ -477,7 +539,6 @@ def run_custom_date_probe(dep, ret):
                 except Exception:
                     pass
 
-            # تمرير خفيف لمحاكاة التفاعل الطبيعي
             page.mouse.wheel(0, random.randint(150, 300))
             try:
                 page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=6000)
@@ -515,16 +576,21 @@ def run_custom_date_probe(dep, ret):
     available_flights.sort(key=lambda x: x["price"])
     cheapest = available_flights[0]
 
+    # حساب مؤشر الثقة للرحلة المخصصة
+    pred = analyze_price_prediction(cheapest["price"], dep)
+
     lines = [
         f"🎯 <b>نتيجة الفحص المخصص الفوري (القصيم ⇄ جدة)</b>\n",
         f"🛫 <b>تاريخ الذهاب:</b> <code>{dep}</code>\n"
         f"🛬 <b>تاريخ العودة:</b> <code>{ret}</code>\n",
         f"🏆 <b>أفضل خيار متاح:</b>\n"
         f"   💰 <b>{cheapest['price']} ر.س إجمالي</b> — ✈️ {cheapest['airline']} (⏰ {cheapest['time_ar']})\n"
+        f"   🎯 <b>مؤشر الثقة في الشراء:</b> <b>{pred['score']}%</b> ({pred['recommendation']})\n"
+        f"   🔮 <b>توقع المسار:</b> <i>{pred['forecast']}</i>\n"
     ]
 
     seen_airlines = set()
-    lines.append("📋 <b>الخيارات المباشرة المتوفرة:</b>")
+    lines.append("\n📋 <b>الخيارات المباشرة المتوفرة:</b>")
     for f in available_flights:
         air_name = f["airline"]
         if air_name not in seen_airlines:
@@ -540,68 +606,7 @@ def run_custom_date_probe(dep, ret):
     send_telegram_msg("\n".join(lines), high_priority=True)
     print("✅ تم إرسال تقرير الفحص المخصص للتيليجرام بنجاح!")
 
-def analyze_price_prediction(cur_p, dep_date_str, prev_p=None):
-    """
-    محرك التنبؤ الاحتمالي وحساب مؤشر الثقة في قرار الشراء (0 - 100%) وتوقع مسار 7 أيام
-    """
-    try:
-        dep_date = datetime.datetime.strptime(dep_date_str, "%Y-%m-%d").date()
-        days_to_dep = (dep_date - datetime.date.today()).days
-    except Exception:
-        days_to_dep = 30
 
-    # 1. معايرة السعر مقارنة بقيعان خط (القصيم ⇄ جدة)
-    if cur_p <= 358:
-        base_score = 96
-        forecast = "السعر في القاع التاريخي المطلق. غير قابل لمزيد من الهبوط وفرصة الشراء مثالية."
-        rec = "احجز فوراً (قاع تاريخي)"
-        level = "high"
-    elif cur_p <= 420:
-        base_score = 86
-        forecast = "سعر اقتصادي منخفض ومناسب جداً، مرشح للاستقرار أو الارتفاع الطفيف."
-        rec = "سعر ممتاز للشراء"
-        level = "high"
-    elif cur_p <= 550:
-        if days_to_dep > 21:
-            base_score = 55
-            forecast = "سعر متوسط. توجد مهلة زمنية كافية لترقب عروض ترويجية بديلة."
-            rec = "راقب وانتظر فرصة أفضل"
-            level = "medium"
-        else:
-            base_score = 76
-            forecast = "موعد السفر يقترب (< 3 أسابيع). احتمال ارتفاع السعر يفوق احتمال هبوطه."
-            rec = "يُفضل تأكيد الحجز قريباً"
-            level = "medium"
-    else:
-        base_score = 28
-        forecast = "أسعار فئات الحجز مرتفعة حالياً. ينصح بعدم الشراء إلا للضرورة القصوى."
-        rec = "سعر متضخم - انتظر هبوط الفئات"
-        level = "low"
-
-    # 2. تعديل النتيجة بحسب وتيرة تغير السعر (Price Velocity)
-    if prev_p:
-        if cur_p < prev_p:
-            base_score = min(99, base_score + 6)
-        elif cur_p > prev_p:
-            if days_to_dep <= 14:
-                base_score = min(95, base_score + 8)
-                forecast = "⚠️ تحذير: وتيرة تصاعدية ملحوظة؛ المقاعد الاقتصادية أوشكت على النفاد."
-            else:
-                base_score = max(15, base_score - 8)
-
-    # 3. تأثير مهلة اللحظات الأخيرة (Last-Minute Volatility)
-    if days_to_dep <= 7 and cur_p <= 500:
-        base_score = min(98, base_score + 8)
-    elif days_to_dep <= 3:
-        forecast = "⏳ رحلة الأسبوع الحالي: التسعير ديناميكي متسارع والمقاعد في نهايتها."
-
-    final_score = max(10, min(99, int(base_score)))
-    return {
-        "score": final_score,
-        "recommendation": rec,
-        "forecast": forecast,
-        "level": level
-    }
 def run_cloud_scan():
     if CUSTOM_DEP and CUSTOM_RET:
         run_custom_date_probe(CUSTOM_DEP, CUSTOM_RET)
@@ -635,7 +640,6 @@ def run_cloud_scan():
                 url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
                 cheapest_flight = None
 
-                # محاولة فحص مع دعم إعادة المحاولة الذكية (Exponential Backoff)
                 for attempt in range(2):
                     try:
                         page.goto(url, wait_until="domcontentloaded", timeout=18000)
@@ -647,7 +651,6 @@ def run_cloud_scan():
                             except Exception:
                                 pass
 
-                        # سلوك تفاعلي بشري
                         page.mouse.wheel(0, random.randint(100, 250))
 
                         try:
@@ -676,11 +679,11 @@ def run_cloud_scan():
                                 cheapest_flight = min(pm_options, key=lambda x: x["price"]) if pm_options else min(nonstop_options, key=lambda x: x["price"])
                             else:
                                 cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
-                            break  # تم الرصد بنجاح
+                            break
 
                     except Exception:
                         if attempt == 0:
-                            time.sleep(2)  # انتظار وإعادة المحاولة
+                            time.sleep(2)
 
                 if cheapest_flight:
                     cur_p = cheapest_flight["price"]
@@ -689,22 +692,20 @@ def run_cloud_scan():
                     flight_key = f"{dep}_{ret}"
                     print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
-                    # ==========================================
-                    # 🎯 محرك صائد القيعان والهبوط الساحق والنسب المئوية
-                    # ==========================================
                     prev_p = price_history.get(flight_key)
                     last_alert = alert_history.get(flight_key, {})
                     last_alert_p = last_alert.get("price", 9999)
                     last_alert_ts = last_alert.get("time", 0)
 
-                    # حساب نسبة وفرق الهبوط المئوي
+                    # محرك التنبؤ وحساب مؤشر الشراء وتوقع المسار
+                    pred = analyze_price_prediction(cur_p, dep, prev_p)
+
                     diff_amount = (prev_p - cur_p) if prev_p else 0
                     drop_percentage = round((diff_amount / prev_p) * 100) if (prev_p and prev_p > 0) else 0
 
-                    # تصنيف مستويات التنبيه
-                    is_crash_drop = drop_percentage >= 50       # هبوط ساحق (50% أو أكثر)
-                    is_deep_drop = diff_amount >= 60           # هبوط نقدي ملحوظ (60 ر.س فأكثر)
-                    is_rock_bottom = cur_p <= 358              # سعر القاع الترويجي المطلق
+                    is_crash_drop = drop_percentage >= 50
+                    is_deep_drop = diff_amount >= 60
+                    is_rock_bottom = cur_p <= 358
 
                     should_alert = False
                     if is_crash_drop or is_deep_drop or is_rock_bottom:
@@ -714,10 +715,9 @@ def run_cloud_scan():
                     if should_alert:
                         direct_url = get_direct_booking_link(air, dep, ret)
 
-                        # صياغة عنوان وطبيعة التنبيه بإنذار مميز حسب قوة الصفقة
                         if is_crash_drop:
                             header_title = "🚨🔥 <b>صفقة الموسم: انهيار سعري ساحق (خطأ تسعيري محتمل)!</b>"
-                            reason = f"💥 <b>هبوط جنوني بنسبة {drop_percentage}%</b> (وفّرت <b>{diff_amount} ر.س</b> دفعة واحدة!)"
+                            reason = f"💥 <b>هبوط بنسبة {drop_percentage}%</b> (وفّرت <b>{diff_amount} ر.س</b> دفعة واحدة!)"
                         elif is_rock_bottom:
                             header_title = "🔥 <b>صائد القيعان التلقائي: بلوغ سعر القاع التاريخي!</b>"
                             reason = "🎯 <b>السعر وصل للقاع الترويجي الأدنى (358 ر.س أو أقل ذهاب وعودة).</b>"
@@ -732,8 +732,10 @@ def run_cloud_scan():
                             f"🛬 <b>العودة:</b> <code>{ret}</code>\n"
                             f"✈️ <b>الناقل:</b> {air}\n"
                             f"💰 <b>السعر الجديد:</b> <b>{cur_p} ر.س فقط!</b> " + (f"<i>(كان {prev_p} ر.س)</i>\n" if prev_p else "\n") +
+                            f"🎯 <b>مؤشر الثقة في القرار:</b> <b>{pred['score']}%</b> ({pred['recommendation']})\n"
+                            f"🔮 <b>توقعات مسار السعر:</b> <i>{pred['forecast']}</i>\n"
                             f"📢 <b>طبيعة الصفقة:</b> {reason}\n\n"
-                            f"⚡ <i>يُوصى بالحجز فوراً قبل تعديل المقاعد أو إغلاق الفئة.</i>\n\n"
+                            f"⚡ <i>يُوصى بالحجز فوراً قبل تعديل الفئة الترويجية.</i>\n\n"
                             f"✈️ <a href='{direct_url}'><b>اقتناص التذكرة فوراً من موقع {air} ↗</b></a>\n"
                             f"🔍 <a href='{url}'>فحص ومقارنة البدائل على Google Flights ↗</a>"
                         )
@@ -748,10 +750,13 @@ def run_cloud_scan():
                         "تاريخ العودة": ret,
                         "الناقل": air,
                         "السعر": cur_p,
-                        "الرابط": url
+                        "الرابط": url,
+                        "مؤشر_الثقة": pred["score"],
+                        "توصية_القرار": pred["recommendation"],
+                        "توقعات_7_أيام": pred["forecast"],
+                        "مستوى_الثقة": pred["level"]
                     })
 
-                # تأخير زمني بشري عشوائي لمنع رصد التتابع الآلي
                 time.sleep(random.uniform(0.7, 1.6))
 
             browser.close()
@@ -778,7 +783,16 @@ def run_cloud_scan():
         sync_to_google_sheets(results, duration)
         df = pd.DataFrame(results)
 
+        # حفظ نسخة JSON التفاعلية لدعم الـ Telegram Mini App مع بيانات الذكاء التنبؤي
         ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+        mini_app_payload = {
+            "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
+            "flights": results
+        }
+        with open(MINI_APP_DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(mini_app_payload, f, ensure_ascii=False, indent=2)
+        print("📱 تم تحديث ملف بيانات التطبيق المصغر التنبؤي (flights_data.json) بنجاح!")
+
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
         is_morning_window = (8 <= ksa_now.hour < 10)
 
@@ -791,15 +805,6 @@ def run_cloud_scan():
             send_telegram_msg(briefing_text)
 
         df.to_excel(EXCEL_FILE, index=False)
-        # تصدير نسخة JSON لخدمة تطبيق التيليجرام المصغر (Telegram Mini App)
-        ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
-        mini_app_payload = {
-            "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
-            "flights": results
-        }
-        with open("flights_data.json", "w", encoding="utf-8") as f:
-            json.dump(mini_app_payload, f, ensure_ascii=False, indent=2)
-        print("📱 تم توليد وتحديث ملف بيانات التطبيق المصغر (flights_data.json) بنجاح!")
         print(f"✅ اكتملت الدورة السحابية وصيد القيعان بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة.")
 
 
