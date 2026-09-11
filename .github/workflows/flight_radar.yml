@@ -2,46 +2,55 @@ name: Qassim Flight Radar 24/7
 
 on:
   schedule:
-    # يعمل تلقائياً كل ساعتين على مدار اليوم 24/7
+    # تشغيل تلقائي كل ساعتين على مدار الساعة
     - cron: '0 */2 * * *'
   workflow_dispatch:
-
-permissions:
-  contents: write
+    inputs:
+      custom_dep:
+        description: 'تاريخ الذهاب (YYYY-MM-DD)'
+        required: false
+        default: ''
+      custom_ret:
+        description: 'تاريخ العودة (YYYY-MM-DD)'
+        required: false
+        default: ''
 
 jobs:
-  flight-scan:
+  scrape_and_sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
-      - name: 📥 استرجاع ملفات المستودع
+      - name: فحص واستخراج الكود
         uses: actions/checkout@v4
 
-      - name: 🐍 تثبيت بيئة بايثون
+      - name: إعداد بايثون 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: 📦 تثبيت المكتبات ومتصفح Chromium مع حزم النظام
+      - name: تثبيت المكتبات والمتصفح السحابي
         run: |
-          pip install -r requirements.txt
+          pip install --upgrade pip
+          pip install playwright pandas openpyxl matplotlib
           playwright install --with-deps chromium
 
-      - name: 🚀 تشغيل محرك الرادار السحابي
+      - name: تشغيل الرادار السحابي وصائد القيعان
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GOOGLE_SHEET_WEBHOOK_URL: ${{ secrets.GOOGLE_SHEET_WEBHOOK_URL }}
           GOOGLE_SHEET_VIEW_URL: ${{ secrets.GOOGLE_SHEET_VIEW_URL }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          CUSTOM_DEP: ${{ inputs.custom_dep }}
+          CUSTOM_RET: ${{ inputs.custom_ret }}
         run: python flight_scanner_cloud.py
 
-      - name: 💾 حفظ وتحديث سجل وتاريخ الأسعار في المستودع
-        continue-on-error: true
+      - name: حفظ السجلات التاريخية في المستودع
+        if: always()
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff-index --quiet HEAD || git commit -m "🔄 تحديث أرشيف وتاريخ الأسعار تلقائياً"
-          git pull --rebase origin main || true
-          git push origin main || true
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add flight_price_history.json google_flights_weekends.xlsx || true
+          git commit -m "تحديث تلقائي: سجل الأسعار التاريخي [skip ci]" || echo "لا توجد تعديلات لحفظها"
+          git push || echo "فشل دفع التعديلات"
