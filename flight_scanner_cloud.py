@@ -31,7 +31,6 @@ HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
 CHART_IMAGE_PATH = "flight_price_chart.png"
 
-# تكلفة حقيبة الشحن التقديرية (20 كجم ذهاب وعودة)
 BAGGAGE_FEES = {
     "طيران أديل": 140,
     "طيران ناس": 150,
@@ -193,6 +192,7 @@ def parse_airline_name(text):
 
 
 def parse_flight_card_text(text):
+    # 1. استخراج وقت الإقلاع
     time_ar = ""
     raw_time = ""
     m_time = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', text)
@@ -200,27 +200,21 @@ def parse_flight_card_text(text):
         raw_time = m_time.group(1).strip()
         time_ar = raw_time.replace("AM", "ص").replace("PM", "م").replace("am", "ص").replace("pm", "م")
 
-    # تنظيف أوزان الحقائب وانبعاثات الكربون حتى لا تختلط بالأسعار
-    cleaned = re.sub(r'\d+\s*(?:kg|كجم|co2e?).*', '', text, flags=re.IGNORECASE)
+    # 2. خطوة الأمان الحيوية: شطب جميع التوقيتات والمدد وأوزان الحقائب من النص تماماً
+    # هذا يمنع نهائياً قراءة الدقيقة "25" من الساعة "8:25" كسعر!
+    cleaned = re.sub(r'\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?', '', text)
+    cleaned = re.sub(r'\d+\s*(?:hr|h|min|m|ساعة|دقيقة|kg|كجم|co2e?).*', '', cleaned, flags=re.IGNORECASE)
 
     price = None
-    # 1. البحث المقترن برمز العملة: يقبل أي سعر حقيقي يبدأ من 10 ر.س (يلتقط العروض الترويجية الخارقة)
-    matches = re.findall(r'(?:sar|ر\.س|ريال)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال)', cleaned, re.IGNORECASE)
+    # 3. قبول السعر فقط إذا كان مقترناً حصراً برمز العملة (SAR / ر.س / ريال)
+    matches = re.findall(r'(?:sar|ر\.س|ريال|sr)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال|sr)', cleaned, re.IGNORECASE)
     for m1, m2 in matches:
         raw_val = m1 if m1 else m2
         v = int(raw_val.replace(',', ''))
-        if 10 <= v <= 4000:
+        # حد الأمان المنطقي لتذكرة ذهاب وعودة إجمالية: بين 130 و 4000 ر.س
+        if 130 <= v <= 4000:
             price = v
             break
-
-    # 2. في حال كان السعر رقماً مجرداً دون رمز عملة
-    if not price:
-        alt_matches = re.findall(r'\b(\d{2,4})\b', cleaned)
-        for val in alt_matches:
-            v = int(val)
-            if 25 <= v <= 3500:
-                price = v
-                break
 
     airline = parse_airline_name(text)
     return price, airline, time_ar, raw_time
@@ -424,9 +418,9 @@ def run_cloud_scan():
                 air = cheapest_flight["airline"]
                 f_time = cheapest_flight["time_ar"]
                 flight_key = f"{dep}_{ret}"
-                print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
+                print(f"[{idx}/{len(pairs)}] ✅ رصد حقيقي: {trip_type} -> {cur_p} ر.س ({air})")
 
-                # صائد العروض الخاطفة (Flash Sale Sniffer)
+                # صائد العروض الخاطفة الحقيقي (خصم حقيقي لا يقل عن 70 ر.س أو قاع حقيقي تحت 260 ر.س)
                 prev_p = history.get(flight_key)
                 is_deep_drop = prev_p and (prev_p - cur_p >= 70)
                 is_rock_bottom = cur_p <= 260
@@ -485,7 +479,7 @@ def run_cloud_scan():
         df = pd.DataFrame(columns=["نوع العطلة", "تاريخ الذهاب", "وقت الإقلاع", "تاريخ العودة", "الناقل", "السعر", "الرابط"])
 
     df.to_excel(EXCEL_FILE, index=False)
-    print(f"✅ اكتملت الدورة السحابية بنجاح! تم رصد {len(results)} رحلة وتحديث الشيت.")
+    print(f"✅ اكتملت الدورة السحابية بنجاح! تم رصد {len(results)} رحلة حقيقية.")
 
 
 if __name__ == "__main__":
