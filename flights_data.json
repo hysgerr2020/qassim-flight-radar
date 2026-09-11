@@ -1,0 +1,53 @@
+{
+  "updated_at": "2026-09-11 02:30 PM",
+  "flights": [
+    {
+      "trip_type": "خميس إلى سبت",
+      "dep": "2026-09-17 (2:05 م)",
+      "ret": "2026-09-19",
+      "airline": "طيران ناس",
+      "price": 798,
+      "link": "https://www.google.com/travel/flights"
+    },
+    {
+      "trip_type": "خميس إلى جمعة",
+      "dep": "2026-09-24 (5:40 م)",
+      "ret": "2026-09-25",
+      "airline": "طيران أديل",
+      "price": 808,
+      "link": "https://www.google.com/travel/flights"
+    },
+    {
+      "trip_type": "🇸🇦 إجازة اليوم الوطني (أربعاء إلى جمعة)",
+      "dep": "2026-09-23 (7:35 م)",
+      "ret": "2026-09-25",
+      "airline": "طيران أديل",
+      "price": 808,
+      "link": "https://www.google.com/travel/flights"
+    },
+    {
+      "trip_type": "🇸🇦 إجازة اليوم الوطني (ثلاثاء إلى سبت)",
+      "dep": "2026-09-22 (9:05 م)",
+      "ret": "2026-09-26",
+      "airline": "طيران أديل",
+      "price": 858,
+      "link": "https://www.google.com/travel/flights"
+    },
+    {
+      "trip_type": "خميس إلى سبت",
+      "dep": "2026-10-01 (6:15 م)",
+      "ret": "2026-10-03",
+      "airline": "طيران أديل",
+      "price": 358,
+      "link": "https://www.google.com/travel/flights"
+    },
+    {
+      "trip_type": "خميس إلى جمعة",
+      "dep": "2026-10-08 (8:20 م)",
+      "ret": "2026-10-09",
+      "airline": "الخطوط السعودية",
+      "price": 436,
+      "link": "https://www.google.com/travel/flights"
+    }
+  ]
+}
