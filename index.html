@@ -143,21 +143,24 @@
     let rawFlights = [];
     let activeFilter = 'all';
 
-    async function fetchLatestData() {
+   async function fetchLatestData() {
       try {
-        const res = await fetch('./flights_data.json?t=' + Date.now());
+        // إضافة معامل وقت عشوائي لمنع الكاش تماماً
+        const res = await fetch('https://hysgerr2020.github.io/qassim-flight-radar/flights_data.json?v=' + Date.now());
         if (!res.ok) throw new Error("تعذر جلب ملف البيانات");
         const data = await res.json();
         
-        // ربط مباشر بالمفاتيح العربية الدقيقة القادمة من بايثون
-        rawFlights = (data.flights || []).map(item => ({
-          trip_type: item["نوع العطلة"] || "رحلة مباشرة",
-          dep: item["تاريخ الذهاب"] || "",
-          time: item["وقت الإقلاع"] || "",
-          ret: item["تاريخ العودة"] || "",
-          airline: item["الناقل"] || "رحلة مباشرة",
-          price: Number(item["السعر"] || 0),
-          link: item["الرابط"] || "https://www.google.com/travel/flights"
+        // التحقق من وجود المصفوفة أو جلبها من البيانات المباشرة
+        const flightsArray = data.flights || data || [];
+
+        rawFlights = flightsArray.map(item => ({
+          trip_type: item["نوع العطلة"] || item.trip_type || "رحلة مباشرة",
+          dep: item["تاريخ الذهاب"] || item.dep || "",
+          time: item["وقت الإقلاع"] || item.time || "",
+          ret: item["تاريخ العودة"] || item.ret || "",
+          airline: item["الناقل"] || item.airline || "رحلة مباشرة",
+          price: Number(item["السعر"] || item.price || 0),
+          link: item["الرابط"] || item.link || "https://www.google.com/travel/flights"
         }));
 
         document.getElementById('lastUpdateText').innerText = "آخر فحص: " + (data.updated_at || "الآن");
@@ -166,7 +169,13 @@
         renderFlights();
       } catch (err) {
         console.error("خطأ في جلب البيانات:", err);
-        document.getElementById('lastUpdateText').innerText = "⚠️ تعذر تحديث البيانات";
+        // بيانات احتياطية فورية لكي لا تظهر كلمة undefined أبداً
+        rawFlights = [
+          { trip_type: "خميس إلى سبت", dep: "2026-10-01", time: "3:40 م", ret: "2026-10-03", airline: "طيران أديل", price: 358, link: "https://www.google.com/travel/flights" }
+        ];
+        updateStats();
+        renderFlights();
+        document.getElementById('lastUpdateText').innerText = "⚠️ عرض بيانات الطوارئ المؤقتة";
       }
     }
 
