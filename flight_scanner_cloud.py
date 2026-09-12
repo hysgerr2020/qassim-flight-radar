@@ -6,6 +6,7 @@ import random
 import re
 import time
 import traceback
+import urllib.error
 import urllib.parse
 import urllib.request
 import pandas as pd
@@ -73,12 +74,16 @@ REALISTIC_PROFILES = [
     }
 ]
 
+def get_ksa_now():
+    """الحصول على توقيت مكة المكرمة الموحد القياسي (UTC+3) دون دوال مهملة"""
+    return datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=3)
+
 # ==========================================
 # 🧹 تطهير وأرشفة البيانات التاريخية
 # ==========================================
 def prune_expired_history(hist_data):
-    """تطهير السجل التاريخي وحذف أي رحلات انتهى تاريخ سفرها بتوقيت مكة المكرمة"""
-    ksa_today = (datetime.datetime.utcnow() + datetime.timedelta(hours=3)).date()
+    """تطهير السجل التاريخي وحذف أي رحلات انتهى موعد إقلاعها بتوقيت مكة"""
+    ksa_today = get_ksa_now().date()
     prices = hist_data.get("prices", {})
     alerts = hist_data.get("alerts", {})
 
@@ -242,6 +247,7 @@ def send_telegram_msg(message, reply_markup=None, high_priority=False):
         with urllib.request.urlopen(req, timeout=15) as resp:
             return True
     except urllib.error.HTTPError as he:
+        # معالجة فورية لحالة خطأ الـ HTML 400 بإرسال نص مجرد
         if he.code == 400:
             try:
                 clean_plain_text = re.sub(r'<[^>]+>', '', message)
@@ -301,27 +307,32 @@ def sync_to_google_sheets(results, execution_time_sec):
         print(f"⚠️ رابط الويب هوك غير صالح: {GOOGLE_SHEET_WEBHOOK_URL}")
         return
 
-    ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+    ksa_now = get_ksa_now()
+    flights_payload = []
+    for item in results:
+        dep_date = item.get("تاريخ الذهاب", item.get("dep", ""))
+        flight_time = item.get("وقت الإقلاع", item.get("time_ar", ""))
+        dep_str = f"{dep_date} ({flight_time})" if flight_time else dep_date
+        
+        flights_payload.append({
+            "trip_type": item.get("نوع العطلة", item.get("trip_type", "عطلة نهاية الأسبوع")),
+            "dep": dep_str,
+            "ret": item.get("تاريخ العودة", item.get("ret", "")),
+            "airline": item.get("الناقل", item.get("airline", "رحلة مباشرة")),
+            "price": int(item.get("السعر", item.get("price", 0))),
+            "link": item.get("الرابط", item.get("link", "")),
+            "score": item.get("مؤشر_الثقة", item.get("score", 80)),
+            "recommendation": item.get("توصية_القرار", item.get("recommendation", "سعر مناسب")),
+            "forecast": item.get("توقعات_7_أيام", item.get("forecast", "")),
+            "level": item.get("مستوى_الثقة", item.get("level", "medium"))
+        })
+
     payload_data = {
         "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
         "raw_timestamp": int(ksa_now.timestamp()),
         "scan_duration_sec": execution_time_sec,
-        "flight_count": len(results),
-        "flights": [
-            {
-                "trip_type": item.get("نوع العطلة", item.get("trip_type", "عطلة نهاية الأسبوع")),
-                "dep": f"{item['تاريخ الذهاب']} ({item['وقت الإقلاع']})" if item.get("وقت الإقلاع") else item.get("تاريخ الذهاب", item.get("dep", "")),
-                "ret": item.get("تاريخ العودة", item.get("ret", "")),
-                "airline": item.get("الناقل", item.get("airline", "رحلة مباشرة")),
-                "price": int(item.get("السعر", item.get("price", 0))),
-                "link": item.get("الرابط", item.get("link", "")),
-                "score": item.get("مؤشر_الثقة", item.get("score", 80)),
-                "recommendation": item.get("توصية_القرار", item.get("recommendation", "سعر مناسب")),
-                "forecast": item.get("توقعات_7_أيام", item.get("forecast", "")),
-                "level": item.get("مستوى_الثقة", item.get("level", "medium"))
-            }
-            for item in results
-        ]
+        "flight_count": len(flights_payload),
+        "flights": flights_payload
     }
 
     try:
@@ -546,7 +557,7 @@ def build_briefing_message(items):
     if not items:
         return "لا توجد رحلات مباشرة مرصودة حالياً."
 
-    ksa_today = (datetime.datetime.utcnow() + datetime.timedelta(hours=3)).date()
+    ksa_today = get_ksa_now().date()
     upcoming = []
     for x in items:
         try:
@@ -588,8 +599,8 @@ def build_briefing_message(items):
     ch_type = cheapest_overall.get('نوع العطلة', cheapest_overall.get('trip_type', ''))
     ch_price = cheapest_overall.get('السعر', cheapest_overall.get('price', 0))
 
-    t_next = f" | ⏰ {next_weekend['وقت الإقلاع']}" if next_weekend.get("وقت الإقلاع") else ""
-    t_cheap = f" | ⏰ {cheapest_overall['وقت الإقلاع']}" if cheapest_overall.get("وقت الإقلاع") else ""
+    t_next = f" | ⏰ {next_weekend.get('وقت الإقلاع', next_weekend.get('time_ar', ''))}" if next_weekend.get('وقت الإقلاع') or next_weekend.get('time_ar') else ""
+    t_cheap = f" | ⏰ {cheapest_overall.get('وقت الإقلاع', cheapest_overall.get('time_ar', ''))}" if cheapest_overall.get('وقت الإقلاع') or cheapest_overall.get('time_ar') else ""
 
     direct_next = get_direct_booking_link(nw_airline, nw_dep, nw_ret, "roundtrip")
     tp_flight_next = get_affiliate_flight_link(nw_dep, nw_ret, "roundtrip")
@@ -605,7 +616,7 @@ def build_briefing_message(items):
     bw_type = best_with_bag.get('نوع العطلة', best_with_bag.get('trip_type', ''))
     tp_hotel_bag = get_affiliate_hotel_link(bw_dep, bw_ret)
 
-    ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+    ksa_now = get_ksa_now()
     text = (
         f"☀️ <b>النشرة الذكية لأسعار طيران (القصيم ⇄ جدة)</b>\n"
         f"📅 <i>{ksa_now.strftime('%A, %d %B %Y')}</i>\n\n"
@@ -637,11 +648,14 @@ def build_briefing_message(items):
 # 🛡️ فلترة الموارد وحقن التخفي المتقدم
 # ==========================================
 def intercept_route_resources(route):
-    """حجب الصور والوسائط والخطوط لتوفير 65% من الذاكرة وتسريع التصفح"""
-    if route.request.resource_type in ["image", "media", "font"]:
-        route.abort()
-    else:
-        route.continue_()
+    """حجب الصور والوسائط والخطوط لتوفير 65% من الذاكرة مع حماية ضد TargetClosedError"""
+    try:
+        if route.request.resource_type in ["image", "media", "font"]:
+            route.abort()
+        else:
+            route.continue_()
+    except Exception:
+        pass
 
 def create_stealth_context(browser):
     profile = random.choice(REALISTIC_PROFILES)
@@ -999,7 +1013,7 @@ def run_cloud_scan():
         sync_to_google_sheets(results, duration)
         df = pd.DataFrame(results)
 
-        ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+        ksa_now = get_ksa_now()
         mini_app_payload = {
             "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
             "raw_timestamp": int(ksa_now.timestamp()),
@@ -1025,7 +1039,8 @@ def run_cloud_scan():
         for idx, item in enumerate(results[:15], 1):
             t_dep = item.get('تاريخ الذهاب', item.get('dep', ''))
             t_ret = item.get('تاريخ العودة', item.get('ret', ''))
-            t_time = f" | ⏰ الإقلاع: {item['وقت الإقلاع']}" if item.get('وقت الإقلاع') else ""
+            flight_time = item.get('وقت الإقلاع', item.get('time_ar', ''))
+            t_time = f" | ⏰ الإقلاع: {flight_time}" if flight_time else ""
             airline_name = item.get('الناقل', item.get('airline', 'رحلة مباشرة'))
             
             dir_link = get_direct_booking_link(airline_name, t_dep, t_ret, "roundtrip")
