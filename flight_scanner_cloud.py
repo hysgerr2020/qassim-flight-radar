@@ -56,18 +56,34 @@ def clean_date_str(date_input):
     if not date_input:
         return ""
     match = re.search(r'\b\d{4}[-/]\d{2}[-/]\d{2}\b', str(date_input))
-    return match.group(0).replace('/', '-') if match else str(date_input).strip()
+    return match.group(0).replace('/', '-') if match else ""
 
-def get_baggage_fee(airline_name):
-    """حساب رسوم الأمتعة الإضافية بأعلى دقة وقوة دفاعية ضد اختلاف النصوص"""
-    air = str(airline_name or "").lower()
-    if "السعودية" in air or "saudia" in air:
+def get_baggage_fee(airline_name, is_one_way=False):
+    """حساب رسوم الأمتعة الإضافية بدقة مع مراعاة رحلات الاتجاه الواحد والدمج الذكي"""
+    air = str(airline_name or "")
+    factor = 0.5 if is_one_way else 1.0
+
+    if "دمج ذكي" in air:
+        if "السعودية" in air and ("أديل" in air or "ناس" in air):
+            return int(75 * factor)
+        elif "ناس" in air:
+            return int(150 * factor)
+        return int(140 * factor)
+
+    air_lower = air.lower()
+    if "السعودية" in air or "saudia" in air_lower:
         return 0
-    elif "ناس" in air or "flynas" in air:
-        return 150
-    elif "أديل" in air or "flyadeal" in air:
-        return 140
-    return 140
+    elif "ناس" in air or "flynas" in air_lower:
+        return int(150 * factor)
+    elif "أديل" in air or "flyadeal" in air_lower:
+        return int(140 * factor)
+    return int(140 * factor)
+
+def html_href(url):
+    """حماية وسوم الروابط من تعارض الرموز المحجوزة في مفسر تيليجرام"""
+    if not url:
+        return ""
+    return str(url).replace("&", "&amp;")
 
 # ==========================================
 # 🛡️ مصفوفة بصمات التصفح للتخفي ومقاومة الحظر
@@ -180,7 +196,7 @@ def compute_flight_statistics(results):
     """محرك احتساب المقاييس المرجعية اللحظية (Market Benchmarks)"""
     if not results:
         return {"total": 0, "min_price": 0, "avg_price": 0, "carriers": []}
-    
+
     prices = []
     for x in results:
         val = x.get("السعر", x.get("price", 0))
@@ -190,7 +206,7 @@ def compute_flight_statistics(results):
             pass
 
     carriers = list(set(x.get("الناقل", x.get("airline", "رحلة مباشرة")) for x in results))
-    
+
     return {
         "total": len(results),
         "min_price": min(prices) if prices else 0,
@@ -476,11 +492,11 @@ def parse_flight_card_text(text):
     cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|ساعة|ساعات|دقيقة|دقائق|kg|كجم|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
 
     price = None
-    matches = re.findall(r'(?:sar|ر\.س|ريال|sr)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال|sr)', cleaned, re.IGNORECASE)
+    matches = re.findall(r'(?:sar|ر\.س|ريال|sr)\s*([\d,]+(?:\.\d+)?)|([\d,]+(?:\.\d+)?)\s*(?:sar|ر\.س|ريال|sr)', cleaned, re.IGNORECASE)
     for m1, m2 in matches:
         raw_val = m1 if m1 else m2
         try:
-            v = int(raw_val.replace(',', ''))
+            v = int(float(raw_val.replace(',', '')))
             # توسيع النطاق السعري المقبول لالتقاط عروض القيعان الترويجية الخاطفة
             if 80 <= v <= 4500:
                 price = v
@@ -705,22 +721,22 @@ def build_briefing_message(items):
         f"   🛫 ذهاب: <code>{nw_dep}</code> ⬅ عودة: <code>{nw_ret}</code>\n"
         f"   💰 <b>السعر الإجمالي:</b> <b>{nw_price} ر.س</b> — ✈️ {nw_airline}\n"
         f"   🎯 <b>مؤشر الثقة:</b> <b>{next_weekend.get('مؤشر_الثقة', next_weekend.get('score', 80))}%</b> ({next_weekend.get('توصية_القرار', next_weekend.get('recommendation', 'سعر مناسب'))})\n"
-        f"   ✈️ <a href='{direct_next}'>حجز مباشر من موقع {nw_airline} ↗</a>\n"
-        f"   🔍 <a href='{tp_flight_next}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
-        f"   🏨 <a href='{tp_hotel_next}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
+        f"   ✈️ <a href='{html_href(direct_next)}'>حجز مباشر من موقع {nw_airline} ↗</a>\n"
+        f"   🔍 <a href='{html_href(tp_flight_next)}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
+        f"   🏨 <a href='{html_href(tp_hotel_next)}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
         f"🎒 <b>2. أرخص تذكرة خفيفة (بدون شحن):</b>\n"
         f"   💰 <b>{ch_price} ر.س إجمالي</b> ({ch_type})\n"
         f"   ✈️ {ch_airline}{t_cheap}\n"
         f"   🎯 <b>مؤشر الثقة:</b> <b>{cheapest_overall.get('مؤشر_الثقة', cheapest_overall.get('score', 95))}%</b>\n"
-        f"   ✈️ <a href='{direct_cheap}'>حجز تذكرة القاع مباشرة ↗</a>\n"
-        f"   🔍 <a href='{tp_flight_cheap}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
-        f"   🏨 <a href='{tp_hotel_cheap}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
+        f"   ✈️ <a href='{html_href(direct_cheap)}'>حجز تذكرة القاع مباشرة ↗</a>\n"
+        f"   🔍 <a href='{html_href(tp_flight_cheap)}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
+        f"   🏨 <a href='{html_href(tp_hotel_cheap)}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
         f"🧳 <b>3. أفضل صفقة شاملة حقيبة شحن (20kg):</b>\n"
         f"   💰 <b>{best_bag_price} ر.س إجمالي</b> — ✈️ {bw_airline}\n"
         f"   🗓 {bw_type} (<code>{bw_dep}</code>)\n"
-        f"   🏨 <a href='{tp_hotel_bag}'>عروض فنادق جدة لهذه العطلة ↗</a>\n\n"
+        f"   🏨 <a href='{html_href(tp_hotel_bag)}'>عروض فنادق جدة لهذه العطلة ↗</a>\n\n"
         f"{advice}\n\n"
-        f"📊 <a href='{GOOGLE_SHEET_VIEW_URL}'>فتح جدول Google Sheets المباشر والأرشيف</a>"
+        f"📊 <a href='{html_href(GOOGLE_SHEET_VIEW_URL)}'>فتح جدول Google Sheets المباشر والأرشيف</a>"
     )
     return text
 
@@ -894,7 +910,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
             f"🔍 <b>تقرير فحص {title_head}</b>\n\n"
             f"📅 التاريخ: <code>{dep_clean}</code>" + (f" ⬅ <code>{ret_clean}</code>" if ret_clean else "") + "\n\n"
             f"⚠️ لم يتم العثور على رحلات مباشرة متوفرة في هذا التوقيت أو نفدت المقاعد.\n\n"
-            f"🔗 <a href='{url}'>فحص الرحلات والبدائل المتاحة على Google Flights ↗</a>",
+            f"🔗 <a href='{html_href(url)}'>فحص الرحلات والبدائل المتاحة على Google Flights ↗</a>",
             high_priority=True
         )
         return
@@ -918,23 +934,25 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
     seen = set()
     tp_flight_probe = get_affiliate_flight_link(dep_clean, ret_clean, trip_type)
     tp_hotel_probe = get_affiliate_hotel_link(dep_clean, ret_clean)
+    is_one_way_mode = (trip_type in ["oneway_out", "oneway_in"])
 
     for f in available_flights:
         air = f["airline"]
         if air not in seen:
             seen.add(air)
-            bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air else f" (+{get_baggage_fee(air)} حقيبة)"
+            bag_fee = get_baggage_fee(air, is_one_way=is_one_way_mode)
+            bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air else f" (+{bag_fee} حقيبة)"
             dir_link = get_direct_booking_link(air, dep_clean, ret_clean, trip_type)
             action_label = "حجز مباشر عبر محرك المقارنة ↗" if "دمج ذكي" in air else f"حجز مباشر من موقع {air} ↗"
             lines.append(
                 f"• <b>{f['price']} ر.س</b> — ✈️ {air}{bag_txt} (⏰ {f['time_ar']})\n"
-                f"   🔗 <a href='{dir_link}'>{action_label}</a>"
+                f"   🔗 <a href='{html_href(dir_link)}'>{action_label}</a>"
             )
 
     cal_link = get_google_calendar_link(title_head, cheapest["airline"], dep_clean, ret_clean, cheapest["price"], url)
-    lines.append(f"\n🔍 <a href='{tp_flight_probe}'><b>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</b></a>")
-    lines.append(f"🏨 <a href='{tp_hotel_probe}'><b>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</b></a>")
-    lines.append(f"📅 <a href='{cal_link}'>إضافة موعد الرحلة لتقويم Google ↗</a>")
+    lines.append(f"\n🔍 <a href='{html_href(tp_flight_probe)}'><b>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</b></a>")
+    lines.append(f"🏨 <a href='{html_href(tp_hotel_probe)}'><b>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</b></a>")
+    lines.append(f"📅 <a href='{html_href(cal_link)}'>إضافة موعد الرحلة لتقويم Google ↗</a>")
 
     send_telegram_msg("\n".join(lines), high_priority=True)
     print("✅ تم إرسال تقرير المسار المخصص للتيليجرام بنجاح!")
@@ -1168,9 +1186,9 @@ def run_cloud_scan():
                 f"   🗓 {item.get('نوع العطلة', item.get('trip_type', ''))}{t_time}\n"
                 f"   🛫 ذهاب: <code>{t_dep}</code>\n"
                 f"   🛬 عودة: <code>{t_ret}</code>\n"
-                f"   🔗 <a href='{dir_link}'>{action_label}</a>\n"
-                f"   🔍 <a href='{tp_f}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
-                f"   🏨 <a href='{tp_h}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n"
+                f"   🔗 <a href='{html_href(dir_link)}'>{action_label}</a>\n"
+                f"   🔍 <a href='{html_href(tp_f)}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
+                f"   🏨 <a href='{html_href(tp_h)}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n"
             )
             top_blocks.append(block)
 
