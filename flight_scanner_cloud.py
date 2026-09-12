@@ -78,6 +78,7 @@ REALISTIC_PROFILES = [
 
 
 def load_history():
+    """تحميل سجل الأسعار التاريخي مع استرجاع تلقائي من ملف الـ Mini App إن وُجد"""
     default_state = {"prices": {}, "alerts": {}}
     if os.path.exists(HISTORY_FILE):
         try:
@@ -89,6 +90,25 @@ def load_history():
                     return data
         except Exception:
             pass
+
+    # استرجاع الأسعار السابقة تلقائياً من flights_data.json إذا كان السجل المحلي فارغاً
+    if os.path.exists(MINI_APP_DATA_FILE):
+        try:
+            with open(MINI_APP_DATA_FILE, "r", encoding="utf-8") as f:
+                mini_data = json.load(f)
+                old_flights = mini_data.get("flights", [])
+                recovered_prices = {}
+                for fl in old_flights:
+                    dep_val = fl.get("تاريخ الذهاب", fl.get("dep", ""))
+                    ret_val = fl.get("تاريخ العودة", fl.get("ret", ""))
+                    price_val = fl.get("السعر", fl.get("price", 0))
+                    if dep_val and ret_val and price_val:
+                        recovered_prices[f"{dep_val}_{ret_val}"] = price_val
+                if recovered_prices:
+                    return {"prices": recovered_prices, "alerts": {}}
+        except Exception:
+            pass
+
     return default_state
 
 
@@ -167,6 +187,7 @@ def send_telegram_photo(photo_path, caption=""):
 
 
 def sync_to_google_sheets(results, execution_time_sec):
+    """مزامنة كافة الرحلات مع Google Sheets متضمنة مؤشرات التنبؤ ومستوى الثقة"""
     if not GOOGLE_SHEET_WEBHOOK_URL.startswith("http"):
         print(f"⚠️ رابط الويب هوك غير صالح: {GOOGLE_SHEET_WEBHOOK_URL}")
         return
@@ -184,7 +205,11 @@ def sync_to_google_sheets(results, execution_time_sec):
                 "ret": item["تاريخ العودة"],
                 "airline": item["الناقل"],
                 "price": item["السعر"],
-                "link": item["الرابط"]
+                "link": item["الرابط"],
+                "score": item.get("مؤشر_الثقة", 80),
+                "recommendation": item.get("توصية_القرار", "سعر مناسب"),
+                "forecast": item.get("توقعات_7_أيام", ""),
+                "level": item.get("مستوى_الثقة", "medium")
             }
             for item in results
         ]
@@ -198,9 +223,9 @@ def sync_to_google_sheets(results, execution_time_sec):
             headers={"Content-Type": "application/json"}
         )
         with urllib.request.urlopen(req, timeout=25) as resp:
-            print(f"📤 تم تحديث الشيت السحابي: {resp.read().decode('utf-8')[:150]}")
+            print(f"📤 تم تحديث الشيت السحابي بنجاح: {resp.read().decode('utf-8')[:150]}")
     except Exception as e:
-        print(f"⚠️ خطأ رفع الشيت: {e}")
+        print(f"⚠️ خطأ رفع البيانات للشيت: {e}")
 
 
 def get_all_monitored_pairs(months_ahead=3):
@@ -287,7 +312,7 @@ def parse_flight_card_text(text):
 # ==========================================
 def analyze_price_prediction(cur_p, dep_date_str, prev_p=None):
     """
-    محرك التنبؤ الذكي وحساب مؤشر الثقة في قرار الشراء (0 - 100%) وتوقع مسار السعر لـ 7 أيام
+    محرك التنبؤ الاحتمالي وحساب مؤشر الثقة في قرار الشراء (0 - 100%) وتوقع مسار السعر لـ 7 أيام
     """
     try:
         dep_date = datetime.datetime.strptime(dep_date_str, "%Y-%m-%d").date()
@@ -513,6 +538,7 @@ def create_stealth_context(browser):
 
 
 def run_custom_date_probe(dep, ret):
+    """الفاحص الخاطف للتواريخ الحرة عند الطلب"""
     print(f"🎯 بدء الفاحص الخاطف للتواريخ الحرة (درع التخفي مفعّل): {dep} ⬅ {ret}")
     url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
     available_flights = []
@@ -563,7 +589,6 @@ def run_custom_date_probe(dep, ret):
             browser.close()
 
     if not available_flights:
-        # تجربة المحرك الاحتياطي المزدوج للبحث المخصص
         print(f"⚡ تفعيل المحرك الاحتياطي للبحث المخصص [{dep}]...")
         fallback_res = fallback_http_probe(dep, ret)
         if fallback_res:
@@ -631,7 +656,6 @@ def fallback_http_probe(dep, ret):
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=8) as response:
             html = response.read().decode("utf-8", errors="ignore")
-            # استخراج الأسعار بالهندسة العكسية من نصوص HTML
             prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{3,4})', html)
             if prices:
                 valid_prices = [int(p) for p in prices if 130 <= int(p) <= 3000]
@@ -740,53 +764,14 @@ def run_cloud_scan():
                     print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
                     prev_p = price_history.get(flight_key)
-                    last_alert = alert_history.get(flight_key, {})
-                    last_alert_p = last_alert.get("price", 9999)
-                    last_alert_ts = last_alert.get("time", 0)
-
                     pred = analyze_price_prediction(cur_p, dep, prev_p)
 
+                    # تسجيل كشف الصفقات في سجلات الخادم مع تفويض الإرسال المركزي لـ Code.gs لمنع الازدواجية
                     diff_amount = (prev_p - cur_p) if prev_p else 0
-                    drop_percentage = round((diff_amount / prev_p) * 100) if (prev_p and prev_p > 0) else 0
-
-                    is_crash_drop = drop_percentage >= 50
-                    is_deep_drop = diff_amount >= 60
-                    is_rock_bottom = cur_p <= 358
-
-                    should_alert = False
-                    if is_crash_drop or is_deep_drop or is_rock_bottom:
-                        if cur_p < last_alert_p or (now_ts - last_alert_ts) >= 86400:
-                            should_alert = True
-
-                    if should_alert:
-                        direct_url = get_direct_booking_link(air, dep, ret)
-
-                        if is_crash_drop:
-                            header_title = "🚨🔥 <b>صفقة الموسم: انهيار سعري ساحق (خطأ تسعيري محتمل)!</b>"
-                            reason = f"💥 <b>هبوط بنسبة {drop_percentage}%</b> (وفّرت <b>{diff_amount} ر.س</b> دفعة واحدة!)"
-                        elif is_rock_bottom:
-                            header_title = "🔥 <b>صائد القيعان التلقائي: بلوغ سعر القاع التاريخي!</b>"
-                            reason = "🎯 <b>السعر وصل للقاع الترويجي الأدنى (358 ر.س أو أقل ذهاب وعودة).</b>"
-                        else:
-                            header_title = "⚡📉 <b>رادار الهبوط السريع: انخفاض ملحوظ في السعر</b>"
-                            reason = f"📉 هبوط بمقدار <b>{diff_amount} ر.س</b> ({drop_percentage}%) عن آخر فحص."
-
-                        flash_msg = (
-                            f"{header_title}\n\n"
-                            f"🗓 <b>{trip_type}</b>\n"
-                            f"🛫 <b>الذهاب:</b> <code>{dep}</code> (⏰ {f_time})\n"
-                            f"🛬 <b>العودة:</b> <code>{ret}</code>\n"
-                            f"✈️ <b>الناقل:</b> {air}\n"
-                            f"💰 <b>السعر الجديد:</b> <b>{cur_p} ر.س فقط!</b> " + (f"<i>(كان {prev_p} ر.س)</i>\n" if prev_p else "\n") +
-                            f"🎯 <b>مؤشر الثقة في القرار:</b> <b>{pred['score']}%</b> ({pred['recommendation']})\n"
-                            f"🔮 <b>توقعات مسار السعر:</b> <i>{pred['forecast']}</i>\n"
-                            f"📢 <b>طبيعة الصفقة:</b> {reason}\n\n"
-                            f"⚡ <i>يُوصى بالحجز فوراً قبل تعديل الفئة الترويجية.</i>\n\n"
-                            f"✈️ <a href='{direct_url}'><b>اقتناص التذكرة فوراً من موقع {air} ↗</b></a>\n"
-                            f"🔍 <a href='{url}'>فحص ومقارنة البدائل على Google Flights ↗</a>"
-                        )
-                        send_telegram_msg(flash_msg, high_priority=True)
-                        alert_history[flight_key] = {"price": cur_p, "time": now_ts}
+                    if prev_p and cur_p < prev_p:
+                        drop_pct = round((diff_amount / prev_p) * 100)
+                        if drop_pct >= 50 or diff_amount >= 60 or cur_p <= 358:
+                            print(f"🚨 صفقة مؤكدة: هبوط {drop_pct}% على رحلة {trip_type} (السعر: {cur_p} ر.س) - معالجة الإشعار عبر Code.gs")
 
                     price_history[flight_key] = cur_p
                     results.append({
@@ -822,9 +807,9 @@ def run_cloud_scan():
     hist_state["alerts"] = alert_history
     save_history(hist_state)
 
-    # صمام أمان سلامة البيانات (Data Integrity Guardrail): منع تصفير الشيت أو الـ JSON عند أي عطل نادر
+    # صمام أمان سلامة البيانات (Data Integrity Guardrail)
     if not results:
-        print("⚠️ لم يتم رصد نتائج جديدة، تفعيل استرجاع آخر نسخة صالحة من السجل لحماية التطبيق...")
+        print("⚠️ لم يتم رصد نتائج جديدة، تفعيل استرجاع آخر نسخة صالحة لحماية التطبيق...")
         if os.path.exists(MINI_APP_DATA_FILE):
             try:
                 with open(MINI_APP_DATA_FILE, "r", encoding="utf-8") as f:
@@ -840,9 +825,12 @@ def run_cloud_scan():
 
     if results:
         results = sorted(results, key=lambda x: x["السعر"])
+        
+        # مزامنة البيانات مع Google Sheets متضمنة مؤشرات التنبؤ
         sync_to_google_sheets(results, duration)
         df = pd.DataFrame(results)
 
+        # تحديث ملف الـ Mini App
         ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
         mini_app_payload = {
             "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
@@ -852,6 +840,7 @@ def run_cloud_scan():
             json.dump(mini_app_payload, f, ensure_ascii=False, indent=2)
         print("📱 تم تحديث ملف بيانات التطبيق المصغر التنبؤي (flights_data.json) بنجاح!")
 
+        # التحقق من نافذة النشرة الصباحية أو التشغيل اليدوي
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
         is_morning_window = (8 <= ksa_now.hour < 10)
 
@@ -864,7 +853,7 @@ def run_cloud_scan():
             send_telegram_msg(briefing_text)
 
         df.to_excel(EXCEL_FILE, index=False)
-        print(f"✅ اكتملت الدورة السحابية وصيد القيعان بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة.")
+        print(f"✅ اكتملت الدورة السحابية بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة.")
     else:
         send_telegram_msg("⚠️🚨 تحذير: تعذر الوصول إلى نتائج الفحص ولم يتوفر أرشيف احتياطي!", high_priority=True)
 
