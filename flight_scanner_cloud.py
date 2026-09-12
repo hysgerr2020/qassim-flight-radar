@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from playwright.sync_api import sync_playwright
 
 # ==========================================
@@ -28,6 +29,7 @@ TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
 GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbwglVr2b3S7C97mMKKL2pJNct_yO3R10Fz0a3JCBsbYxtax56-tz-7_8SFwh6RubIdQJw/exec")
 GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
+# متغيرات الفحص المخصص والمسارات المنفصلة
 CUSTOM_DEP = clean_env("CUSTOM_DEP", "")
 CUSTOM_RET = clean_env("CUSTOM_RET", "")
 CUSTOM_TYPE = clean_env("CUSTOM_TYPE", "roundtrip")
@@ -444,17 +446,17 @@ def generate_price_chart(items):
         plt.grid(True, linestyle=':', alpha=0.5, color='#94a3b8')
 
         custom_legend = [
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#10b981', markersize=8, label='Flyadeal'),
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#1e3a8a', markersize=8, label='Saudia'),
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#f59e0b', markersize=8, label='Flynas'),
-            plt.Line2D([0], [0], color='#ef4444', linestyle=':', label=f'Target ({target} SAR)'),
-            plt.Line2D([0], [0], marker='*', color='w', markerfacecolor='#e11d48', markersize=11, label=f'Lowest ({min_p} SAR)')
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#10b981', markersize=8, label='Flyadeal'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#1e3a8a', markersize=8, label='Saudia'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#f59e0b', markersize=8, label='Flynas'),
+            Line2D([0], [0], color='#ef4444', linestyle=':', label=f'Target ({target} SAR)'),
+            Line2D([0], [0], marker='*', color='w', markerfacecolor='#e11d48', markersize=11, label=f'Lowest ({min_p} SAR)')
         ]
         plt.legend(handles=custom_legend, loc='upper right', framealpha=0.9, fontsize=8)
 
         plt.tight_layout()
         plt.savefig(CHART_IMAGE_PATH, dpi=160)
-        plt.close()
+        plt.close('all')
         return True
     except Exception as e:
         print(f"⚠️ خطأ بالرسم البياني: {e}")
@@ -758,10 +760,11 @@ def run_cloud_scan():
             page.route("**/*", intercept_route_resources)
 
             for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
-                # تدوير الصفحة كل 8 رحلات لتطهير الرام ومنع تسريب الذاكرة
-                if idx % 8 == 0:
+                # فحص سلامة الصفحة وإعادة التدوير كل 8 رحلات لتطهير الرام
+                if idx % 8 == 0 or page.is_closed():
                     try:
-                        page.close()
+                        if not page.is_closed():
+                            page.close()
                     except Exception:
                         pass
                     page = context.new_page()
@@ -771,9 +774,12 @@ def run_cloud_scan():
                 cheapest_flight = None
                 playwright_failed = False
 
-                # محاولات ذكية مع Exponential Backoff
                 for attempt in range(3):
                     try:
+                        if page.is_closed():
+                            page = context.new_page()
+                            page.route("**/*", intercept_route_resources)
+
                         page.goto(url, wait_until="domcontentloaded", timeout=16000)
 
                         if "consent.google.com" in page.url:
@@ -850,7 +856,6 @@ def run_cloud_scan():
                         "مستوى_الثقة": pred["level"]
                     })
 
-                # تأخير عشوائي بشري (Human Jitter)
                 time.sleep(random.uniform(1.2, 2.4))
 
             browser.close()
