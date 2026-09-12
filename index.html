@@ -43,10 +43,10 @@
         </div>
         <div>
           <h1 class="text-base font-extrabold text-white leading-tight">رادار طيران القصيم ⇄ جدة</h1>
-          <p id="lastUpdateText" class="text-xs text-slate-400">جاري مزامنة الذكاء التنبؤي...</p>
+          <p id="lastUpdateText" class="text-xs text-slate-400">جاري مزامنة الأسعار الحية...</p>
         </div>
       </div>
-      <button onclick="fetchLatestData()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95">
+      <button onclick="triggerRefresh()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95">
         🔄
       </button>
     </div>
@@ -82,7 +82,7 @@
           <span>حاسبة الركاب والأمتعة التفاعلية</span>
         </h2>
         <span class="text-xs font-bold text-indigo-400 bg-indigo-950/60 px-2 py-0.5 rounded-full border border-indigo-800/60">
-          تحديث ديناميكي
+          تحديث لحظي
         </span>
       </div>
 
@@ -94,17 +94,17 @@
           </div>
           <input id="paxSlider" type="range" min="1" max="6" value="1" 
                  class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                 oninput="renderFlights()">
+                 oninput="handleSliderChange()">
         </div>
 
         <div class="space-y-1">
           <div class="flex justify-between text-xs">
-            <span class="text-slate-400">حقائب الشحن:</span>
+            <span class="text-slate-400">حقائب الشحن (20kg):</span>
             <span id="bagValue" class="font-bold text-white">0</span>
           </div>
           <input id="bagSlider" type="range" min="0" max="4" value="0" 
                  class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                 oninput="renderFlights()">
+                 oninput="handleSliderChange()">
         </div>
       </div>
     </section>
@@ -130,19 +130,48 @@
 
     <!-- Flight Cards Container -->
     <div id="flightsList" class="space-y-3">
-      <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-4 text-center text-slate-400">
-        جاري حساب مسارات التنبؤ...
+      <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-6 text-center text-slate-400">
+        جاري مزامنة وحساب مسارات الأسعار...
       </div>
     </div>
 
   </main>
 
   <script>
-    const tg = window.Telegram ? window.Telegram.WebApp : null;
-    if (tg) { tg.expand(); }
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
 
     let rawFlights = [];
     let activeFilter = 'all';
+
+    function triggerHaptic(type = 'light') {
+      if (tg && tg.HapticFeedback) {
+        tg.HapticFeedback.impactOccurred(type);
+      }
+    }
+
+    function triggerRefresh() {
+      triggerHaptic('medium');
+      fetchLatestData();
+    }
+
+    function handleSliderChange() {
+      triggerHaptic('selection_changed');
+      renderFlights();
+    }
+
+    // الدالة الآمنة لفتح الروابط الخارجية عبر تيليجرام
+    function openBookingUrl(url) {
+      triggerHaptic('light');
+      if (tg && tg.openLink) {
+        tg.openLink(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
 
     async function fetchLatestData() {
       try {
@@ -153,13 +182,13 @@
         rawFlights = (data.flights || []).map(item => {
           const price = Number(item["السعر"] || item.price || 0);
           
-          // حساب مؤشر الثقة والتنبؤ تلقائياً إذا لم يكن مدمجاً في الملف بعد
-          let score = item["مؤشر_الثقة"] || 50;
-          let rec = item["توصية_القرار"] || "راقب السعر";
-          let forecast = item["توقعات_7_أيام"] || "السعر ضمن النطاق الطبيعي للخط.";
-          let level = item["مستوى_الثقة"] || "medium";
+          let score = item["مؤشر_الثقة"] || item.score || 50;
+          let rec = item["توصية_القرار"] || item.recommendation || "راقب السعر";
+          let forecast = item["توقعات_7_أيام"] || item.forecast || "السعر ضمن النطاق الطبيعي للخط.";
+          let level = item["مستوى_الثقة"] || item.level || "medium";
 
-          if (!item["مؤشر_الثقة"]) {
+          // في حال عدم توفر مؤشرات التنبؤ نحسبها لحظياً
+          if (!item["مؤشر_الثقة"] && !item.score) {
             if (price <= 358) {
               score = 96;
               rec = "احجز فوراً (قاع تاريخي)";
@@ -183,11 +212,15 @@
             }
           }
 
+          let depVal = item["تاريخ الذهاب"] || item.dep || "";
+          let timeVal = item["وقت الإقلاع"] || item.time || "";
+          let retVal = item["تاريخ العودة"] || item.ret || "";
+
           return {
             trip_type: item["نوع العطلة"] || item.trip_type || "رحلة مباشرة",
-            dep: item["تاريخ الذهاب"] || item.dep || "",
-            time: item["وقت الإقلاع"] || item.time || "",
-            ret: item["تاريخ العودة"] || item.ret || "",
+            dep: depVal,
+            time: timeVal,
+            ret: retVal,
             airline: item["الناقل"] || item.airline || "رحلة مباشرة",
             price: price,
             link: item["الرابط"] || item.link || "https://www.google.com/travel/flights",
@@ -203,7 +236,7 @@
         renderFlights();
       } catch (err) {
         console.error("خطأ في جلب البيانات:", err);
-        document.getElementById('lastUpdateText').innerText = "⚠️ تعذر تحديث البيانات";
+        document.getElementById('lastUpdateText').innerText = "⚠️ تعذر قراءة البيانات السحابية";
       }
     }
 
@@ -224,6 +257,7 @@
     }
 
     function setFilter(type) {
+      triggerHaptic('selection_changed');
       activeFilter = type;
       document.querySelectorAll('.filter-btn').forEach(b => {
         b.classList.remove('bg-indigo-600', 'text-white');
@@ -269,13 +303,15 @@
       }
 
       filtered.forEach(item => {
+        const isOneWay = !item.ret || item.ret.trim() === "";
         let bagFee = 0;
         if (!item.airline.includes("السعودية")) {
-          bagFee = item.airline.includes("ناس") ? 150 * bags : 140 * bags;
+          const perBagFee = item.airline.includes("ناس") ? 150 : 140;
+          // في حال كانت الرحلة اتجاه واحد تكون رسوم الشحن للنصف
+          bagFee = (isOneWay ? (perBagFee / 2) : perBagFee) * bags;
         }
-        const finalPrice = (item.price * pax) + bagFee;
+        const finalPrice = Math.round((item.price * pax) + bagFee);
 
-        // شريط ومؤشر الثقة
         let barColor = "bg-rose-500";
         let badgeBg = "bg-rose-950 text-rose-300 border-rose-800/60";
         if (item.score >= 85) {
@@ -290,6 +326,17 @@
         if (item.airline.includes("أديل")) airlineColor = "bg-emerald-950 text-emerald-400 border-emerald-800/60";
         if (item.airline.includes("ناس")) airlineColor = "bg-amber-950 text-amber-400 border-amber-800/60";
         if (item.airline.includes("السعودية")) airlineColor = "bg-blue-950 text-blue-300 border-blue-800/60";
+
+        // ضبط عرض التاريخ لعدم تكرار الوقت
+        let timeDisplay = "";
+        if (item.time && !item.dep.includes(item.time)) {
+          timeDisplay = `(${item.time})`;
+        }
+
+        // عرض العودة بذكاء: إما تاريخ العودة أو وسم اتجاه واحد
+        const returnHtml = isOneWay ? 
+          `<div class="text-xs text-indigo-400 font-bold mt-0.5">🛫 اتجاه واحد فقط</div>` :
+          `<div class="text-xs text-slate-400 mt-0.5">عودة: <code>${item.ret}</code></div>`;
 
         const card = document.createElement('div');
         card.className = "bg-slate-800/70 border border-slate-700/70 rounded-2xl p-4 shadow-lg space-y-3";
@@ -306,21 +353,19 @@
             <div>
               <div class="text-xs text-slate-400">مواعيد الرحلة</div>
               <div class="text-sm font-bold text-white mt-0.5">
-                ذهاب: <code>${item.dep}</code> ${item.time ? '(' + item.time + ')' : ''}
+                ذهاب: <code>${item.dep}</code> ${timeDisplay}
               </div>
-              <div class="text-xs text-slate-400">
-                عودة: <code>${item.ret}</code>
-              </div>
+              ${returnHtml}
             </div>
 
             <div class="text-left">
-              <span class="text-xs text-slate-400 block">${pax > 1 || bags > 0 ? 'التكلفة الإجمالية' : 'السعر الإجمالي'}</span>
+              <span class="text-xs text-slate-400 block">${pax > 1 || bags > 0 ? 'التكلفة الإجمالية' : 'السعر'}</span>
               <span class="text-2xl font-black text-white">${finalPrice}</span>
               <span class="text-xs text-slate-300">ر.س</span>
             </div>
           </div>
 
-          <!-- شريط الثقة والتنبؤ -->
+          <!-- شريط الثقة والتنبؤ الاحتمالي -->
           <div class="bg-slate-900/60 border border-slate-700/50 rounded-xl p-2.5 space-y-2">
             <div class="flex items-center justify-between text-xs">
               <span class="text-slate-400 flex items-center gap-1">
@@ -340,11 +385,11 @@
           </div>
 
           <div class="pt-0.5">
-            <a href="${item.link}" target="_blank" 
-               class="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
+            <button onclick="openBookingUrl('${item.link}')" 
+                    class="w-full flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
               <span>عرض الرحلة والحجز المباشر</span>
               <span>↗</span>
-            </a>
+            </button>
           </div>
         `;
         container.appendChild(card);
