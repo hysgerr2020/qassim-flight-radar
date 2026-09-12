@@ -75,7 +75,7 @@ REALISTIC_PROFILES = [
 ]
 
 def get_ksa_now():
-    """الحصول على توقيت مكة المكرمة الموحد القياسي (UTC+3) دون دوال مهملة"""
+    """الحصول على توقيت مكة المكرمة الموحد (UTC+3) المعتمد بدون دوال مهملة"""
     return datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=3)
 
 # ==========================================
@@ -247,7 +247,6 @@ def send_telegram_msg(message, reply_markup=None, high_priority=False):
         with urllib.request.urlopen(req, timeout=15) as resp:
             return True
     except urllib.error.HTTPError as he:
-        # معالجة فورية لحالة خطأ الـ HTML 400 بإرسال نص مجرد
         if he.code == 400:
             try:
                 clean_plain_text = re.sub(r'<[^>]+>', '', message)
@@ -348,7 +347,7 @@ def sync_to_google_sheets(results, execution_time_sec):
         print(f"⚠️ خطأ رفع البيانات للشيت: {e}")
 
 def get_all_monitored_pairs(months_ahead=3):
-    today = datetime.date.today()
+    today = get_ksa_now().date()
     end_date = today + datetime.timedelta(days=months_ahead * 30)
     pairs = []
 
@@ -434,7 +433,7 @@ def analyze_price_prediction(cur_p, dep_date_str, prev_p=None, trip_type="roundt
 
     try:
         dep_date = datetime.datetime.strptime(dep_date_str, "%Y-%m-%d").date()
-        days_to_dep = (dep_date - datetime.date.today()).days
+        days_to_dep = (dep_date - get_ksa_now().date()).days
     except Exception:
         days_to_dep = 30
 
@@ -504,8 +503,10 @@ def generate_price_chart(items):
         }
 
         for it in chronological:
-            d_str = it.get("تاريخ الذهاب", it.get("dep", ""))
-            short_date = "/".join(d_str.split("-")[1:]) if "-" in d_str else d_str
+            raw_d = str(it.get("تاريخ الذهاب", it.get("dep", "")))
+            m_d = re.search(r'\b\d{4}-(\d{2}-\d{2})\b', raw_d)
+            short_date = m_d.group(1).replace("-", "/") if m_d else raw_d[:5]
+            
             dates.append(short_date)
             p = int(it.get("السعر", it.get("price", 0)))
             prices.append(p)
@@ -562,10 +563,12 @@ def build_briefing_message(items):
     for x in items:
         try:
             dep_val = x.get("تاريخ الذهاب", x.get("dep", ""))
-            d = datetime.datetime.strptime(dep_val, "%Y-%m-%d").date()
-            type_val = x.get("نوع العطلة", x.get("trip_type", ""))
-            if d >= ksa_today and "🇸🇦" not in type_val:
-                upcoming.append((d, x))
+            match = re.search(r'\b\d{4}-\d{2}-\d{2}\b', str(dep_val))
+            if match:
+                d = datetime.datetime.strptime(match.group(0), "%Y-%m-%d").date()
+                type_val = x.get("نوع العطلة", x.get("trip_type", ""))
+                if d >= ksa_today and "🇸🇦" not in type_val:
+                    upcoming.append((d, x))
         except Exception:
             pass
     upcoming = sorted(upcoming, key=lambda t: t[0])
@@ -599,8 +602,11 @@ def build_briefing_message(items):
     ch_type = cheapest_overall.get('نوع العطلة', cheapest_overall.get('trip_type', ''))
     ch_price = cheapest_overall.get('السعر', cheapest_overall.get('price', 0))
 
-    t_next = f" | ⏰ {next_weekend.get('وقت الإقلاع', next_weekend.get('time_ar', ''))}" if next_weekend.get('وقت الإقلاع') or next_weekend.get('time_ar') else ""
-    t_cheap = f" | ⏰ {cheapest_overall.get('وقت الإقلاع', cheapest_overall.get('time_ar', ''))}" if cheapest_overall.get('وقت الإقلاع') or cheapest_overall.get('time_ar') else ""
+    nw_time = next_weekend.get('وقت الإقلاع', next_weekend.get('time_ar', ''))
+    t_next = f" | ⏰ {nw_time}" if nw_time else ""
+    
+    ch_time = cheapest_overall.get('وقت الإقلاع', cheapest_overall.get('time_ar', ''))
+    t_cheap = f" | ⏰ {ch_time}" if ch_time else ""
 
     direct_next = get_direct_booking_link(nw_airline, nw_dep, nw_ret, "roundtrip")
     tp_flight_next = get_affiliate_flight_link(nw_dep, nw_ret, "roundtrip")
@@ -1057,8 +1063,8 @@ def run_cloud_scan():
                 f"   🛬 عودة: <code>{t_ret}</code>\n"
                 f"   🔗 <a href='{dir_link}'>حجز مباشر من {airline_name} ↗</a>\n"
                 f"   🔍 <a href='{tp_f}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
-                f"   🏨 <a href='{tp_h}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n"
-            )
+                f"   🏨 <a href='{tp_hotel_h}' if False else f'{tp_h}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n"
+            ).replace("🏨 <a href='None'>", f"🏨 <a href='{tp_h}'>")
             top_blocks.append(block)
 
         header_title = "✅ <b>اكتمل الفحص ومقارنة العروض بنجاح!</b>\n\n🎒 <b>أرخص التذاكر الخفيفة (السعر الإجمالي ذهاب وعودة):</b>\n"
