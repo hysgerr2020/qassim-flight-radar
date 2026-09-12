@@ -22,7 +22,7 @@ from playwright.sync_api import sync_playwright
 def clean_env(key, default=""):
     val = os.environ.get(key, default)
     if val:
-        return val.strip("[]'\" \t\r\n")
+        return str(val).strip("[]'\" \t\r\n")
     return default
 
 TELEGRAM_BOT_TOKEN = clean_env("TELEGRAM_BOT_TOKEN", "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0")
@@ -759,39 +759,40 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
                 "--disable-infobars"
             ]
         )
-        context = create_stealth_context(browser)
-        page = context.new_page()
-        page.route("**/*", intercept_route_resources)
-
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=22000)
-            if "consent.google.com" in page.url:
-                try:
-                    page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
-                    page.wait_for_load_state("domcontentloaded", timeout=5000)
-                except Exception:
-                    pass
+            context = create_stealth_context(browser)
+            page = context.new_page()
+            page.route("**/*", intercept_route_resources)
 
-            page.mouse.wheel(0, random.randint(150, 300))
             try:
-                page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=6500)
-            except Exception:
-                time.sleep(2)
+                page.goto(url, wait_until="domcontentloaded", timeout=22000)
+                if "consent.google.com" in page.url:
+                    try:
+                        page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
+                        page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except Exception:
+                        pass
 
-            cards = page.locator("li.pIav2d, div.pIav2d").all()
-            for c in cards:
-                txt = c.inner_text()
-                if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
-                    price, airline, time_ar, raw_time = parse_flight_card_text(txt)
-                    if price:
-                        available_flights.append({
-                            "price": int(price),
-                            "airline": airline,
-                            "time_ar": time_ar,
-                            "raw_time": raw_time
-                        })
-        except Exception as e:
-            print(f"⚠️ خطأ أثناء الفحص المخصص: {e}")
+                page.mouse.wheel(0, random.randint(150, 300))
+                try:
+                    page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=6500)
+                except Exception:
+                    time.sleep(2)
+
+                cards = page.locator("li.pIav2d, div.pIav2d").all()
+                for c in cards:
+                    txt = c.inner_text()
+                    if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
+                        price, airline, time_ar, raw_time = parse_flight_card_text(txt)
+                        if price:
+                            available_flights.append({
+                                "price": int(price),
+                                "airline": airline,
+                                "time_ar": time_ar,
+                                "raw_time": raw_time
+                            })
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء الفحص المخصص: {e}")
         finally:
             browser.close()
 
@@ -878,110 +879,112 @@ def run_cloud_scan():
                 ]
             )
 
-            context = create_stealth_context(browser)
-            page = context.new_page()
-            page.route("**/*", intercept_route_resources)
+            try:
+                context = create_stealth_context(browser)
+                page = context.new_page()
+                page.route("**/*", intercept_route_resources)
 
-            for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
-                # فحص سلامة الصفحة وإعادة التدوير كل 8 رحلات لتطهير الرام
-                if idx % 8 == 0 or page.is_closed():
-                    try:
-                        if not page.is_closed():
-                            page.close()
-                    except Exception:
-                        pass
-                    page = context.new_page()
-                    page.route("**/*", intercept_route_resources)
-
-                url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
-                cheapest_flight = None
-                playwright_failed = False
-
-                for attempt in range(3):
-                    try:
-                        if page.is_closed():
-                            page = context.new_page()
-                            page.route("**/*", intercept_route_resources)
-
-                        page.goto(url, wait_until="domcontentloaded", timeout=16000)
-
-                        if "consent.google.com" in page.url:
-                            try:
-                                page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
-                                page.wait_for_load_state("domcontentloaded", timeout=4000)
-                            except Exception:
-                                pass
-
-                        page.mouse.wheel(0, random.randint(100, 250))
-
+                for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
+                    # فحص سلامة الصفحة وإعادة التدوير كل 8 رحلات لتطهير الرام
+                    if idx % 8 == 0 or page.is_closed():
                         try:
-                            page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=5000)
+                            if not page.is_closed():
+                                page.close()
                         except Exception:
-                            time.sleep(1.2)
+                            pass
+                        page = context.new_page()
+                        page.route("**/*", intercept_route_resources)
 
-                        cards = page.locator("li.pIav2d, div.pIav2d").all()
-                        nonstop_options = []
+                    url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
+                    cheapest_flight = None
+                    playwright_failed = False
 
-                        for c in cards:
-                            txt = c.inner_text()
-                            if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
-                                price, airline, time_ar, raw_time = parse_flight_card_text(txt)
-                                if price:
-                                    nonstop_options.append({
-                                        "price": int(price),
-                                        "airline": airline,
-                                        "time_ar": time_ar,
-                                        "raw_time": raw_time
-                                    })
+                    for attempt in range(3):
+                        try:
+                            if page.is_closed():
+                                page = context.new_page()
+                                page.route("**/*", intercept_route_resources)
 
-                        if nonstop_options:
-                            if "جمعة إلى سبت" in trip_type:
-                                pm_options = [o for o in nonstop_options if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
-                                cheapest_flight = min(pm_options, key=lambda x: int(x["price"])) if pm_options else min(nonstop_options, key=lambda x: int(x["price"]))
+                            page.goto(url, wait_until="domcontentloaded", timeout=16000)
+
+                            if "consent.google.com" in page.url:
+                                try:
+                                    page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
+                                    page.wait_for_load_state("domcontentloaded", timeout=4000)
+                                except Exception:
+                                    pass
+
+                            page.mouse.wheel(0, random.randint(100, 250))
+
+                            try:
+                                page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=5000)
+                            except Exception:
+                                time.sleep(1.2)
+
+                            cards = page.locator("li.pIav2d, div.pIav2d").all()
+                            nonstop_options = []
+
+                            for c in cards:
+                                txt = c.inner_text()
+                                if "nonstop" in txt.lower() or "مباشر" in txt or "بدون توقف" in txt:
+                                    price, airline, time_ar, raw_time = parse_flight_card_text(txt)
+                                    if price:
+                                        nonstop_options.append({
+                                            "price": int(price),
+                                            "airline": airline,
+                                            "time_ar": time_ar,
+                                            "raw_time": raw_time
+                                        })
+
+                            if nonstop_options:
+                                if "جمعة إلى سبت" in trip_type:
+                                    pm_options = [o for o in nonstop_options if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
+                                    cheapest_flight = min(pm_options, key=lambda x: int(x["price"])) if pm_options else min(nonstop_options, key=lambda x: int(x["price"]))
+                                else:
+                                    cheapest_flight = min(nonstop_options, key=lambda x: int(x["price"]))
+                                playwright_failed = False
+                                break
                             else:
-                                cheapest_flight = min(nonstop_options, key=lambda x: int(x["price"]))
-                            playwright_failed = False
-                            break
-                        else:
+                                playwright_failed = True
+
+                        except Exception as loop_e:
                             playwright_failed = True
+                            wait_backoff = (2 ** attempt) + random.uniform(0.5, 1.5)
+                            time.sleep(wait_backoff)
 
-                    except Exception as loop_e:
-                        playwright_failed = True
-                        wait_backoff = (2 ** attempt) + random.uniform(0.5, 1.5)
-                        time.sleep(wait_backoff)
+                    if playwright_failed or not cheapest_flight:
+                        print(f"⚡ المحرك الاحتياطي (Fallback Engine) للرحلة [{dep}]...")
+                        cheapest_flight = fallback_http_probe(dep, ret, "roundtrip")
 
-                if playwright_failed or not cheapest_flight:
-                    print(f"⚡ المحرك الاحتياطي (Fallback Engine) للرحلة [{dep}]...")
-                    cheapest_flight = fallback_http_probe(dep, ret, "roundtrip")
+                    if cheapest_flight:
+                        cur_p = int(cheapest_flight["price"])
+                        air = cheapest_flight["airline"]
+                        f_time = cheapest_flight["time_ar"]
+                        flight_key = f"{dep}_{ret}"
+                        print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
-                if cheapest_flight:
-                    cur_p = int(cheapest_flight["price"])
-                    air = cheapest_flight["airline"]
-                    f_time = cheapest_flight["time_ar"]
-                    flight_key = f"{dep}_{ret}"
-                    print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
+                        prev_p = price_history.get(flight_key)
+                        pred = analyze_price_prediction(cur_p, dep, prev_p, "roundtrip")
 
-                    prev_p = price_history.get(flight_key)
-                    pred = analyze_price_prediction(cur_p, dep, prev_p, "roundtrip")
+                        price_history[flight_key] = cur_p
+                        results.append({
+                            "نوع العطلة": trip_type,
+                            "تاريخ الذهاب": dep,
+                            "وقت الإقلاع": f_time,
+                            "تاريخ العودة": ret,
+                            "الناقل": air,
+                            "السعر": cur_p,
+                            "الرابط": url,
+                            "مؤشر_الثقة": pred["score"],
+                            "توصية_القرار": pred["recommendation"],
+                            "توقعات_7_أيام": pred["forecast"],
+                            "مستوى_الثقة": pred["level"]
+                        })
 
-                    price_history[flight_key] = cur_p
-                    results.append({
-                        "نوع العطلة": trip_type,
-                        "تاريخ الذهاب": dep,
-                        "وقت الإقلاع": f_time,
-                        "تاريخ العودة": ret,
-                        "الناقل": air,
-                        "السعر": cur_p,
-                        "الرابط": url,
-                        "مؤشر_الثقة": pred["score"],
-                        "توصية_القرار": pred["recommendation"],
-                        "توقعات_7_أيام": pred["forecast"],
-                        "مستوى_الثقة": pred["level"]
-                    })
+                    time.sleep(random.uniform(1.2, 2.4))
 
-                time.sleep(random.uniform(1.2, 2.4))
-
-            browser.close()
+            finally:
+                browser.close()
 
     except Exception as fatal_e:
         print(f"❌ خطأ جسيم في تشغيل المتصفح: {fatal_e}")
@@ -1063,8 +1066,8 @@ def run_cloud_scan():
                 f"   🛬 عودة: <code>{t_ret}</code>\n"
                 f"   🔗 <a href='{dir_link}'>حجز مباشر من {airline_name} ↗</a>\n"
                 f"   🔍 <a href='{tp_f}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
-                f"   🏨 <a href='{tp_hotel_h}' if False else f'{tp_h}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n"
-            ).replace("🏨 <a href='None'>", f"🏨 <a href='{tp_h}'>")
+                f"   🏨 <a href='{tp_h}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n"
+            )
             top_blocks.append(block)
 
         header_title = "✅ <b>اكتمل الفحص ومقارنة العروض بنجاح!</b>\n\n🎒 <b>أرخص التذاكر الخفيفة (السعر الإجمالي ذهاب وعودة):</b>\n"
