@@ -148,13 +148,12 @@ def get_affiliate_flight_link(dep, ret="", trip_type="roundtrip"):
         target = f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=ar&gl=sa"
     else:
         target = f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep}%20nonstop&curr=SAR&hl=ar&gl=sa"
-    return f"https://tp.media/r?marker={TRAVELPAYOUTS_MARKER}&trs=297424&p=4114&u={urllib.parse.quote(target)}"
+    return f"https://tp.media/r?marker={TRAVELPAYOUTS_MARKER}&u={urllib.parse.quote(target)}"
 
 def get_affiliate_hotel_link(dep, ret=""):
     checkin = dep
     checkout = ret if ret else dep
-    target = f"https://www.booking.com/searchresults.ar.html?ss=Jeddah&checkin={checkin}&checkout={checkout}"
-    return f"https://tp.media/r?marker={TRAVELPAYOUTS_MARKER}&trs=297424&p=4115&u={urllib.parse.quote(target)}"
+    return f"https://search.hotellook.com/?destination=Jeddah&checkIn={checkin}&checkOut={checkout}&marker={TRAVELPAYOUTS_MARKER}&language=ar&currency=SAR"
 
 def get_google_calendar_link(trip_type_label, airline, dep, ret="", price=0, url=""):
     dep_clean = dep.replace("-", "")
