@@ -1,5 +1,6 @@
 import calendar
 import datetime
+import html as html_lib
 import json
 import os
 import random
@@ -306,7 +307,13 @@ def send_telegram_msg(message, reply_markup=None, high_priority=False):
             except Exception as retry_e:
                 print(f"⚠️ فشل إرسال النص البديل: {retry_e}")
         elif he.code == 429:
-            time.sleep(2)
+            retry_after = 3
+            try:
+                err_resp = json.loads(he.read().decode('utf-8'))
+                retry_after = err_resp.get("parameters", {}).get("retry_after", 3)
+            except Exception:
+                pass
+            time.sleep(retry_after)
             try:
                 with urllib.request.urlopen(req, timeout=15) as _:
                     return True
@@ -331,6 +338,9 @@ def send_telegram_long_message(msg_blocks, header=""):
         send_telegram_msg(current_msg.strip())
 
 def send_telegram_photo(photo_path, caption=""):
+    if not os.path.exists(photo_path) or os.path.getsize(photo_path) == 0:
+        return
+
     try:
         boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW'
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
@@ -631,6 +641,7 @@ def generate_price_chart(items):
             Line2D([0], [0], marker='o', color='w', markerfacecolor='#10b981', markersize=8, label='Flyadeal'),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='#1e3a8a', markersize=8, label='Saudia'),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='#f59e0b', markersize=8, label='Flynas'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#8b5cf6', markersize=8, label='Smart Combo'),
             Line2D([0], [0], color='#ef4444', linestyle=':', label=f'Target ({target} SAR)'),
             Line2D([0], [0], marker='*', color='w', markerfacecolor='#e11d48', markersize=11, label=f'Lowest ({min_p} SAR)')
         ]
@@ -811,13 +822,13 @@ def fallback_http_probe(dep, ret="", trip_type="roundtrip"):
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as response:
-            html = response.read().decode("utf-8", errors="ignore")
-            prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{2,4})|([0-9]{2,4})\s*(?:SAR|ر\.س)|\"SAR\",\s*([0-9]{2,4})', html)
+            html = html_lib.unescape(response.read().decode("utf-8", errors="ignore"))
+            prices = re.findall(r'(?:SAR|ر\.س)[\s\xa0]*([0-9]{2,4}(?:\.\d+)?)|([0-9]{2,4}(?:\.\d+)?)[\s\xa0]*(?:SAR|ر\.س)|[\"\']SAR[\"\']\s*,\s*([0-9]{2,4})', html)
             valid_prices = []
             for g1, g2, g3 in prices:
                 val = g1 or g2 or g3
                 if val:
-                    p_val = int(val)
+                    p_val = int(float(val))
                     if 80 <= p_val <= 4500:
                         valid_prices.append(p_val)
             if valid_prices:
@@ -994,8 +1005,17 @@ def run_cloud_scan():
                     dep_clean = clean_date_str(dep)
                     ret_clean = clean_date_str(ret)
 
-                    # فحص سلامة الصفحة وإعادة التدوير كل 8 رحلات لتطهير الرام
-                    if idx % 8 == 0 or page.is_closed():
+                    # تدوير كامل لبصمة التصفح كل 12 رحلة لتفادي أي تصنيف سلوكي من قِبل جوجل
+                    if idx % 12 == 0:
+                        try:
+                            page.close()
+                            context.close()
+                        except Exception:
+                            pass
+                        context = create_stealth_context(browser)
+                        page = context.new_page()
+                        page.route("**/*", intercept_route_resources)
+                    elif idx % 6 == 0 or page.is_closed():
                         try:
                             if not page.is_closed():
                                 page.close()
@@ -1158,9 +1178,9 @@ def run_cloud_scan():
         is_morning_window = (8 <= ksa_now.hour < 10)
 
         if is_manual_trigger or is_morning_window:
-            generate_price_chart(results)
+            chart_success = generate_price_chart(results)
             briefing_text = build_briefing_message(results)
-            if os.path.exists(CHART_IMAGE_PATH):
+            if chart_success and os.path.exists(CHART_IMAGE_PATH):
                 caption = f"📈 <b>مخطط حركة أسعار (القصيم ⇄ جدة)</b>\n• أديل (أخضر) | السعودية (كحلي) | ناس (ذهبي)"
                 send_telegram_photo(CHART_IMAGE_PATH, caption=caption)
             send_telegram_msg(briefing_text)
