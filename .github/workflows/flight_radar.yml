@@ -2,7 +2,7 @@ name: Qassim Flight Radar 24/7
 
 on:
   schedule:
-    # تشغيل تلقائي كل ساعتين على مدار الساعة
+    # تشغيل تلقائي دوري كل ساعتين على مدار الساعة
     - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
@@ -19,7 +19,7 @@ on:
         required: false
         default: 'roundtrip'
 
-# منع تشغيل عمليتي فحص في نفس اللحظة لمنع أخطاء التزامن والتدافع
+# قفل التزامن لمنع تصادم الفحص التلقائي مع طلبات التيليجرام الفورية
 concurrency:
   group: flight-radar-engine
   cancel-in-progress: false
