@@ -29,6 +29,7 @@ TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
 GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbwglVr2b3S7C97mMKKL2pJNct_yO3R10Fz0a3JCBsbYxtax56-tz-7_8SFwh6RubIdQJw/exec")
 GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
+# متغيرات الفحص المخصص والمسارات المنفصلة
 CUSTOM_DEP = clean_env("CUSTOM_DEP", "")
 CUSTOM_RET = clean_env("CUSTOM_RET", "")
 CUSTOM_TYPE = clean_env("CUSTOM_TYPE", "roundtrip")
@@ -72,6 +73,43 @@ REALISTIC_PROFILES = [
     }
 ]
 
+# ==========================================
+# 🧹 تطهير وأرشفة البيانات التاريخية
+# ==========================================
+def prune_expired_history(hist_data):
+    """تطهير السجل التاريخي وحذف أي رحلات انتهى تاريخ سفرها بتوقيت مكة المكرمة"""
+    ksa_today = (datetime.datetime.utcnow() + datetime.timedelta(hours=3)).date()
+    prices = hist_data.get("prices", {})
+    alerts = hist_data.get("alerts", {})
+
+    pruned_prices = {}
+    for key, val in prices.items():
+        try:
+            match = re.search(r'\b\d{4}-\d{2}-\d{2}\b', str(key))
+            if match:
+                d_dep = datetime.datetime.strptime(match.group(0), "%Y-%m-%d").date()
+                if d_dep >= ksa_today:
+                    pruned_prices[key] = int(val)
+            else:
+                pruned_prices[key] = int(val)
+        except Exception:
+            pruned_prices[key] = val
+
+    pruned_alerts = {}
+    for key, val in alerts.items():
+        try:
+            match = re.search(r'\b\d{4}-\d{2}-\d{2}\b', str(key))
+            if match:
+                d_dep = datetime.datetime.strptime(match.group(0), "%Y-%m-%d").date()
+                if d_dep >= ksa_today:
+                    pruned_alerts[key] = val
+            else:
+                pruned_alerts[key] = val
+        except Exception:
+            pruned_alerts[key] = val
+
+    return {"prices": pruned_prices, "alerts": pruned_alerts}
+
 def load_history():
     default_state = {"prices": {}, "alerts": {}}
     if os.path.exists(HISTORY_FILE):
@@ -80,8 +118,8 @@ def load_history():
                 data = json.load(f)
                 if isinstance(data, dict):
                     if "prices" not in data:
-                        return {"prices": data, "alerts": {}}
-                    return data
+                        data = {"prices": data, "alerts": {}}
+                    return prune_expired_history(data)
         except Exception:
             pass
 
@@ -101,7 +139,7 @@ def load_history():
                         except Exception:
                             pass
                 if recovered_prices:
-                    return {"prices": recovered_prices, "alerts": {}}
+                    return prune_expired_history({"prices": recovered_prices, "alerts": {}})
         except Exception:
             pass
 
@@ -109,10 +147,33 @@ def load_history():
 
 def save_history(hist_data):
     try:
+        clean_state = prune_expired_history(hist_data)
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(hist_data, f, ensure_ascii=False, indent=2)
+            json.dump(clean_state, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ فشل حفظ السجل التاريخي: {e}")
+
+def compute_flight_statistics(results):
+    """محرك احتساب المقاييس المرجعية اللحظية (Market Benchmarks)"""
+    if not results:
+        return {"total": 0, "min_price": 0, "avg_price": 0, "carriers": []}
+    
+    prices = []
+    for x in results:
+        val = x.get("السعر", x.get("price", 0))
+        try:
+            prices.append(int(val))
+        except Exception:
+            pass
+
+    carriers = list(set(x.get("الناقل", x.get("airline", "رحلة مباشرة")) for x in results))
+    
+    return {
+        "total": len(results),
+        "min_price": min(prices) if prices else 0,
+        "avg_price": round(sum(prices) / len(prices)) if prices else 0,
+        "carriers": carriers
+    }
 
 # ==========================================
 # 💰 دوال توليد الروابط المباشرة والتتبعية للأرباح
@@ -181,7 +242,6 @@ def send_telegram_msg(message, reply_markup=None, high_priority=False):
         with urllib.request.urlopen(req, timeout=15) as resp:
             return True
     except urllib.error.HTTPError as he:
-        # إذا رفض تيليجرام الرسالة بسبب خطأ في تنسيق HTML (كود 400)، أرسلها فوراً بدون HTML
         if he.code == 400:
             try:
                 clean_plain_text = re.sub(r'<[^>]+>', '', message)
@@ -249,16 +309,16 @@ def sync_to_google_sheets(results, execution_time_sec):
         "flight_count": len(results),
         "flights": [
             {
-                "trip_type": item["نوع العطلة"],
-                "dep": f"{item['تاريخ الذهاب']} ({item['وقت الإقلاع']})" if item.get("وقت الإقلاع") else item["تاريخ الذهاب"],
-                "ret": item["تاريخ العودة"],
-                "airline": item["الناقل"],
-                "price": int(item["السعر"]),
-                "link": item["الرابط"],
-                "score": item.get("مؤشر_الثقة", 80),
-                "recommendation": item.get("توصية_القرار", "سعر مناسب"),
-                "forecast": item.get("توقعات_7_أيام", ""),
-                "level": item.get("مستوى_الثقة", "medium")
+                "trip_type": item.get("نوع العطلة", item.get("trip_type", "عطلة نهاية الأسبوع")),
+                "dep": f"{item['تاريخ الذهاب']} ({item['وقت الإقلاع']})" if item.get("وقت الإقلاع") else item.get("تاريخ الذهاب", item.get("dep", "")),
+                "ret": item.get("تاريخ العودة", item.get("ret", "")),
+                "airline": item.get("الناقل", item.get("airline", "رحلة مباشرة")),
+                "price": int(item.get("السعر", item.get("price", 0))),
+                "link": item.get("الرابط", item.get("link", "")),
+                "score": item.get("مؤشر_الثقة", item.get("score", 80)),
+                "recommendation": item.get("توصية_القرار", item.get("recommendation", "سعر مناسب")),
+                "forecast": item.get("توقعات_7_أيام", item.get("forecast", "")),
+                "level": item.get("مستوى_الثقة", item.get("level", "medium"))
             }
             for item in results
         ]
@@ -422,7 +482,7 @@ def generate_price_chart(items):
         return False
 
     try:
-        chronological = sorted(items, key=lambda x: str(x.get("تاريخ الذهاب", "")))
+        chronological = sorted(items, key=lambda x: str(x.get("تاريخ الذهاب", x.get("dep", ""))))
         dates = []
         prices = []
         colors = []
@@ -433,12 +493,12 @@ def generate_price_chart(items):
         }
 
         for it in chronological:
-            d_str = it.get("تاريخ الذهاب", "")
+            d_str = it.get("تاريخ الذهاب", it.get("dep", ""))
             short_date = "/".join(d_str.split("-")[1:]) if "-" in d_str else d_str
             dates.append(short_date)
-            p = int(it.get("السعر", 0))
+            p = int(it.get("السعر", it.get("price", 0)))
             prices.append(p)
-            air = it.get("الناقل", "أخرى")
+            air = it.get("الناقل", it.get("airline", "أخرى"))
             c = "#8b5cf6" if "دمج ذكي" in air else color_map.get(air, "#6b7280")
             colors.append(c)
 
@@ -486,12 +546,14 @@ def build_briefing_message(items):
     if not items:
         return "لا توجد رحلات مباشرة مرصودة حالياً."
 
-    today = datetime.date.today()
+    ksa_today = (datetime.datetime.utcnow() + datetime.timedelta(hours=3)).date()
     upcoming = []
     for x in items:
         try:
-            d = datetime.datetime.strptime(x["تاريخ الذهاب"], "%Y-%m-%d").date()
-            if d >= today and "🇸🇦" not in x.get("نوع العطلة", ""):
+            dep_val = x.get("تاريخ الذهاب", x.get("dep", ""))
+            d = datetime.datetime.strptime(dep_val, "%Y-%m-%d").date()
+            type_val = x.get("نوع العطلة", x.get("trip_type", ""))
+            if d >= ksa_today and "🇸🇦" not in type_val:
                 upcoming.append((d, x))
         except Exception:
             pass
@@ -501,12 +563,12 @@ def build_briefing_message(items):
 
     items_with_bags = sorted(
         items,
-        key=lambda it: int(it["السعر"]) + BAGGAGE_FEES.get(it["الناقل"], 140)
+        key=lambda it: int(it.get("السعر", it.get("price", 0))) + BAGGAGE_FEES.get(it.get("الناقل", it.get("airline", "")), 140)
     )
     best_with_bag = items_with_bags[0]
-    best_bag_price = int(best_with_bag["السعر"]) + BAGGAGE_FEES.get(best_with_bag["الناقل"], 140)
+    best_bag_price = int(best_with_bag.get("السعر", best_with_bag.get("price", 0))) + BAGGAGE_FEES.get(best_with_bag.get("الناقل", best_with_bag.get("airline", "")), 140)
 
-    min_p = int(cheapest_overall["السعر"])
+    min_p = int(cheapest_overall.get("السعر", cheapest_overall.get("price", 0)))
     if min_p <= 360:
         advice = "🟢 <b>توصية الرادار:</b> الأسعار حالياً في <b>القاع التاريخي (358 ر.س أو أقل)</b>. فرصة ممتازة لتأكيد الحجوزات الآن."
     elif min_p <= 420:
@@ -514,41 +576,57 @@ def build_briefing_message(items):
     else:
         advice = "🔴 <b>توصية الرادار:</b> الأسعار مرتفعة، ينصح بالانتظار."
 
+    nw_airline = next_weekend.get('الناقل', next_weekend.get('airline', ''))
+    nw_dep = next_weekend.get('تاريخ الذهاب', next_weekend.get('dep', ''))
+    nw_ret = next_weekend.get('تاريخ العودة', next_weekend.get('ret', ''))
+    nw_type = next_weekend.get('نوع العطلة', next_weekend.get('trip_type', ''))
+    nw_price = next_weekend.get('السعر', next_weekend.get('price', 0))
+
+    ch_airline = cheapest_overall.get('الناقل', cheapest_overall.get('airline', ''))
+    ch_dep = cheapest_overall.get('تاريخ الذهاب', cheapest_overall.get('dep', ''))
+    ch_ret = cheapest_overall.get('تاريخ العودة', cheapest_overall.get('ret', ''))
+    ch_type = cheapest_overall.get('نوع العطلة', cheapest_overall.get('trip_type', ''))
+    ch_price = cheapest_overall.get('السعر', cheapest_overall.get('price', 0))
+
     t_next = f" | ⏰ {next_weekend['وقت الإقلاع']}" if next_weekend.get("وقت الإقلاع") else ""
     t_cheap = f" | ⏰ {cheapest_overall['وقت الإقلاع']}" if cheapest_overall.get("وقت الإقلاع") else ""
 
-    direct_next = get_direct_booking_link(next_weekend['الناقل'], next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'], "roundtrip")
-    tp_flight_next = get_affiliate_flight_link(next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'], "roundtrip")
-    tp_hotel_next = get_affiliate_hotel_link(next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'])
+    direct_next = get_direct_booking_link(nw_airline, nw_dep, nw_ret, "roundtrip")
+    tp_flight_next = get_affiliate_flight_link(nw_dep, nw_ret, "roundtrip")
+    tp_hotel_next = get_affiliate_hotel_link(nw_dep, nw_ret)
 
-    direct_cheap = get_direct_booking_link(cheapest_overall['الناقل'], cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'], "roundtrip")
-    tp_flight_cheap = get_affiliate_flight_link(cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'], "roundtrip")
-    tp_hotel_cheap = get_affiliate_hotel_link(cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'])
+    direct_cheap = get_direct_booking_link(ch_airline, ch_dep, ch_ret, "roundtrip")
+    tp_flight_cheap = get_affiliate_flight_link(ch_dep, ch_ret, "roundtrip")
+    tp_hotel_cheap = get_affiliate_hotel_link(ch_dep, ch_ret)
 
-    tp_hotel_bag = get_affiliate_hotel_link(best_with_bag['تاريخ الذهاب'], best_with_bag['تاريخ العودة'])
+    bw_dep = best_with_bag.get('تاريخ الذهاب', best_with_bag.get('dep', ''))
+    bw_ret = best_with_bag.get('تاريخ العودة', best_with_bag.get('ret', ''))
+    bw_airline = best_with_bag.get('الناقل', best_with_bag.get('airline', ''))
+    bw_type = best_with_bag.get('نوع العطلة', best_with_bag.get('trip_type', ''))
+    tp_hotel_bag = get_affiliate_hotel_link(bw_dep, bw_ret)
 
     ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
     text = (
         f"☀️ <b>النشرة الذكية لأسعار طيران (القصيم ⇄ جدة)</b>\n"
         f"📅 <i>{ksa_now.strftime('%A, %d %B %Y')}</i>\n\n"
         f"📍 <b>1. أقرب عطلة نهاية أسبوع:</b>\n"
-        f"   🗓 <b>{next_weekend['نوع العطلة']}</b>{t_next}\n"
-        f"   🛫 ذهاب: <code>{next_weekend['تاريخ الذهاب']}</code> ⬅ عودة: <code>{next_weekend['تاريخ العودة']}</code>\n"
-        f"   💰 <b>السعر الإجمالي:</b> <b>{next_weekend['السعر']} ر.س</b> — ✈️ {next_weekend['الناقل']}\n"
-        f"   🎯 <b>مؤشر الثقة:</b> <b>{next_weekend.get('مؤشر_الثقة', 80)}%</b> ({next_weekend.get('توصية_القرار', 'سعر مناسب')})\n"
-        f"   ✈️ <a href='{direct_next}'>حجز مباشر من موقع {next_weekend['الناقل']} ↗</a>\n"
+        f"   🗓 <b>{nw_type}</b>{t_next}\n"
+        f"   🛫 ذهاب: <code>{nw_dep}</code> ⬅ عودة: <code>{nw_ret}</code>\n"
+        f"   💰 <b>السعر الإجمالي:</b> <b>{nw_price} ر.س</b> — ✈️ {nw_airline}\n"
+        f"   🎯 <b>مؤشر الثقة:</b> <b>{next_weekend.get('مؤشر_الثقة', next_weekend.get('score', 80))}%</b> ({next_weekend.get('توصية_القرار', next_weekend.get('recommendation', 'سعر مناسب'))})\n"
+        f"   ✈️ <a href='{direct_next}'>حجز مباشر من موقع {nw_airline} ↗</a>\n"
         f"   🔍 <a href='{tp_flight_next}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
         f"   🏨 <a href='{tp_hotel_next}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
         f"🎒 <b>2. أرخص تذكرة خفيفة (بدون شحن):</b>\n"
-        f"   💰 <b>{cheapest_overall['السعر']} ر.س إجمالي</b> ({cheapest_overall['نوع العطلة']})\n"
-        f"   ✈️ {cheapest_overall['الناقل']}{t_cheap}\n"
-        f"   🎯 <b>مؤشر الثقة:</b> <b>{cheapest_overall.get('مؤشر_الثقة', 95)}%</b>\n"
+        f"   💰 <b>{ch_price} ر.س إجمالي</b> ({ch_type})\n"
+        f"   ✈️ {ch_airline}{t_cheap}\n"
+        f"   🎯 <b>مؤشر الثقة:</b> <b>{cheapest_overall.get('مؤشر_الثقة', cheapest_overall.get('score', 95))}%</b>\n"
         f"   ✈️ <a href='{direct_cheap}'>حجز تذكرة القاع مباشرة ↗</a>\n"
         f"   🔍 <a href='{tp_flight_cheap}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
         f"   🏨 <a href='{tp_hotel_cheap}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
         f"🧳 <b>3. أفضل صفقة شاملة حقيبة شحن (20kg):</b>\n"
-        f"   💰 <b>{best_bag_price} ر.س إجمالي</b> — ✈️ {best_with_bag['الناقل']}\n"
-        f"   🗓 {best_with_bag['نوع العطلة']} (<code>{best_with_bag['تاريخ الذهاب']}</code>)\n"
+        f"   💰 <b>{best_bag_price} ر.س إجمالي</b> — ✈️ {bw_airline}\n"
+        f"   🗓 {bw_type} (<code>{bw_dep}</code>)\n"
         f"   🏨 <a href='{tp_hotel_bag}'>عروض فنادق جدة لهذه العطلة ↗</a>\n\n"
         f"{advice}\n\n"
         f"📊 <a href='{GOOGLE_SHEET_VIEW_URL}'>فتح جدول Google Sheets المباشر والأرشيف</a>"
@@ -621,7 +699,6 @@ def fallback_http_probe(dep, ret="", trip_type="roundtrip"):
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as response:
             html = response.read().decode("utf-8", errors="ignore")
-            # رصد الأسعار من النصوص الصريحة أو مصفوفات JSON Bootstrap
             prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{3,4})|([0-9]{3,4})\s*(?:SAR|ر\.س)|\"SAR\",\s*([0-9]{3,4})', html)
             valid_prices = []
             for g1, g2, g3 in prices:
@@ -688,7 +765,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
                     price, airline, time_ar, raw_time = parse_flight_card_text(txt)
                     if price:
                         available_flights.append({
-                            "price": price,
+                            "price": int(price),
                             "airline": airline,
                             "time_ar": time_ar,
                             "raw_time": raw_time
@@ -831,7 +908,7 @@ def run_cloud_scan():
                                 price, airline, time_ar, raw_time = parse_flight_card_text(txt)
                                 if price:
                                     nonstop_options.append({
-                                        "price": price,
+                                        "price": int(price),
                                         "airline": airline,
                                         "time_ar": time_ar,
                                         "raw_time": raw_time
@@ -917,18 +994,21 @@ def run_cloud_scan():
         )
 
     if results:
-        results = sorted(results, key=lambda x: int(x["السعر"]))
+        results = sorted(results, key=lambda x: int(x.get("السعر", x.get("price", 0))))
+        stats_summary = compute_flight_statistics(results)
         sync_to_google_sheets(results, duration)
         df = pd.DataFrame(results)
 
         ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
         mini_app_payload = {
             "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
+            "raw_timestamp": int(ksa_now.timestamp()),
+            "stats": stats_summary,
             "flights": results
         }
         with open(MINI_APP_DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(mini_app_payload, f, ensure_ascii=False, indent=2)
-        print("📱 تم تحديث ملف بيانات التطبيق المصغر التنبؤي (flights_data.json) بنجاح!")
+        print("📱 تم تحديث ملف بيانات التطبيق المصغر التنبؤي (flights_data.json) بنجاح مع الإحصاءات المرجعية!")
 
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
         is_morning_window = (8 <= ksa_now.hour < 10)
@@ -943,23 +1023,24 @@ def run_cloud_scan():
 
         top_blocks = []
         for idx, item in enumerate(results[:15], 1):
-            t_dep = item['تاريخ الذهاب']
-            t_ret = item['تاريخ العودة']
+            t_dep = item.get('تاريخ الذهاب', item.get('dep', ''))
+            t_ret = item.get('تاريخ العودة', item.get('ret', ''))
             t_time = f" | ⏰ الإقلاع: {item['وقت الإقلاع']}" if item.get('وقت الإقلاع') else ""
+            airline_name = item.get('الناقل', item.get('airline', 'رحلة مباشرة'))
             
-            dir_link = get_direct_booking_link(item['الناقل'], t_dep, t_ret, "roundtrip")
+            dir_link = get_direct_booking_link(airline_name, t_dep, t_ret, "roundtrip")
             tp_f = get_affiliate_flight_link(t_dep, t_ret, "roundtrip")
             tp_h = get_affiliate_hotel_link(t_dep, t_ret)
 
-            price_val = int(item['السعر'])
+            price_val = int(item.get('السعر', item.get('price', 0)))
             price_desc = "358 ر.س إجمالي (179 ذهاب + 179 عودة)" if price_val == 358 else f"{price_val} ر.س إجمالي"
 
             block = (
-                f"{idx}. <b>{price_desc}</b> — ✈️ {item['الناقل']}\n"
-                f"   🗓 {item['نوع العطلة']}{t_time}\n"
+                f"{idx}. <b>{price_desc}</b> — ✈️ {airline_name}\n"
+                f"   🗓 {item.get('نوع العطلة', item.get('trip_type', ''))}{t_time}\n"
                 f"   🛫 ذهاب: <code>{t_dep}</code>\n"
                 f"   🛬 عودة: <code>{t_ret}</code>\n"
-                f"   🔗 <a href='{dir_link}'>حجز مباشر من {item['الناقل']} ↗</a>\n"
+                f"   🔗 <a href='{dir_link}'>حجز مباشر من {airline_name} ↗</a>\n"
                 f"   🔍 <a href='{tp_f}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
                 f"   🏨 <a href='{tp_h}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n"
             )
