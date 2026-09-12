@@ -22,7 +22,10 @@ from playwright.sync_api import sync_playwright
 def clean_env(key, default=""):
     val = os.environ.get(key, default)
     if val:
-        return str(val).strip("[]'\" \t\r\n")
+        s = str(val).strip("[]'\" \t\r\n")
+        if s.lower() in ["none", "null", "undefined"]:
+            return default
+        return s
     return default
 
 TELEGRAM_BOT_TOKEN = clean_env("TELEGRAM_BOT_TOKEN", "8572404205:AAHYoKETrHLjG_lUMpcTrFbB0hNLjqPbDJ0")
@@ -41,12 +44,6 @@ EXCEL_FILE = "google_flights_weekends.xlsx"
 CHART_IMAGE_PATH = "flight_price_chart.png"
 MINI_APP_DATA_FILE = "flights_data.json"
 
-BAGGAGE_FEES = {
-    "طيران أديل": 140,
-    "طيران ناس": 150,
-    "الخطوط السعودية": 0
-}
-
 # كائن المنطقة الزمنية الرسمية لمدينة الرياض ومكة المكرمة (UTC+3)
 KSA_TIMEZONE = datetime.timezone(datetime.timedelta(hours=3))
 
@@ -60,6 +57,17 @@ def clean_date_str(date_input):
         return ""
     match = re.search(r'\b\d{4}[-/]\d{2}[-/]\d{2}\b', str(date_input))
     return match.group(0).replace('/', '-') if match else str(date_input).strip()
+
+def get_baggage_fee(airline_name):
+    """حساب رسوم الأمتعة الإضافية بأعلى دقة وقوة دفاعية ضد اختلاف النصوص"""
+    air = str(airline_name or "").lower()
+    if "السعودية" in air or "saudia" in air:
+        return 0
+    elif "ناس" in air or "flynas" in air:
+        return 150
+    elif "أديل" in air or "flyadeal" in air:
+        return 140
+    return 140
 
 # ==========================================
 # 🛡️ مصفوفة بصمات التصفح للتخفي ومقاومة الحظر
@@ -204,7 +212,7 @@ def get_direct_booking_link(airline, dep, ret="", trip_type="roundtrip"):
     tt_param = "RoundTrip" if is_round else "OneWay"
     ret_param = f"&returnDate={ret_clean}" if is_round else ""
 
-    # تحصين رحلات الدمج الذكي: التوجيه لمحرك البحث لتفادي فشل الحجز في موقع الناقل المنفرد
+    # تحصين رحلات الدمج الذكي: التوجيه لمحرك المقارنة الرسمي لضمان تأكيد رحلتي الذهاب والعودة
     if "دمج ذكي" in air:
         if is_round:
             return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20through%20{ret_clean}%20nonstop&curr=SAR&hl=ar&gl=sa"
@@ -249,7 +257,7 @@ def get_google_calendar_link(trip_type_label, airline, dep, ret="", price=0, url
     return f"https://calendar.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dep_clean}/{ret_clean}&details={details}&location={location}"
 
 # ==========================================
-# 📡 دوال إرسال تيليجرام مع الحماية التلقائية
+# 📡 دوال إرسال تيليجرام مع الحماية والتعافي التلقائي
 # ==========================================
 def send_telegram_msg(message, reply_markup=None, high_priority=False):
     params = {
@@ -282,7 +290,6 @@ def send_telegram_msg(message, reply_markup=None, high_priority=False):
             except Exception as retry_e:
                 print(f"⚠️ فشل إرسال النص البديل: {retry_e}")
         elif he.code == 429:
-            # حماية معدل الطلبات: انتظار وإعادة محاولة تلقائية
             time.sleep(2)
             try:
                 with urllib.request.urlopen(req, timeout=15) as _:
@@ -450,7 +457,6 @@ def parse_flight_card_text(text):
     m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)', text)
     if m_time:
         raw_time = m_time.group(1).strip()
-        # تحويل منسق للوقت يدعم صيغة 12 ساعة و 24 ساعة بدقة
         if re.search(r'[a-zA-Z]', raw_time):
             time_ar = raw_time.replace("AM", "ص").replace("PM", "م").replace("am", "ص").replace("pm", "م")
         else:
@@ -616,11 +622,12 @@ def generate_price_chart(items):
 
         plt.tight_layout()
         plt.savefig(CHART_IMAGE_PATH, dpi=160)
-        plt.close('all')
         return True
     except Exception as e:
         print(f"⚠️ خطأ بالرسم البياني: {e}")
         return False
+    finally:
+        plt.close('all')
 
 def build_briefing_message(items):
     if not items:
@@ -644,10 +651,10 @@ def build_briefing_message(items):
 
     items_with_bags = sorted(
         items,
-        key=lambda it: int(it.get("السعر", it.get("price", 0))) + BAGGAGE_FEES.get(it.get("الناقل", it.get("airline", "")), 140)
+        key=lambda it: int(it.get("السعر", it.get("price", 0))) + get_baggage_fee(it.get("الناقل", it.get("airline", "")))
     )
     best_with_bag = items_with_bags[0]
-    best_bag_price = int(best_with_bag.get("السعر", best_with_bag.get("price", 0))) + BAGGAGE_FEES.get(best_with_bag.get("الناقل", best_with_bag.get("airline", "")), 140)
+    best_bag_price = int(best_with_bag.get("السعر", best_with_bag.get("price", 0))) + get_baggage_fee(best_with_bag.get("الناقل", best_with_bag.get("airline", "")))
 
     min_p = int(cheapest_overall.get("السعر", cheapest_overall.get("price", 0)))
     if min_p <= 360:
@@ -916,7 +923,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
         air = f["airline"]
         if air not in seen:
             seen.add(air)
-            bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air else f" (+{BAGGAGE_FEES.get(air, 140)} حقيبة)"
+            bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air else f" (+{get_baggage_fee(air)} حقيبة)"
             dir_link = get_direct_booking_link(air, dep_clean, ret_clean, trip_type)
             action_label = "حجز مباشر عبر محرك المقارنة ↗" if "دمج ذكي" in air else f"حجز مباشر من موقع {air} ↗"
             lines.append(
