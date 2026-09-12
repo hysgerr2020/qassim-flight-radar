@@ -28,10 +28,9 @@ TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
 GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbwglVr2b3S7C97mMKKL2pJNct_yO3R10Fz0a3JCBsbYxtax56-tz-7_8SFwh6RubIdQJw/exec")
 GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
-# متغيرات الفحص المخصص والمسارات المنفصلة
 CUSTOM_DEP = clean_env("CUSTOM_DEP", "")
 CUSTOM_RET = clean_env("CUSTOM_RET", "")
-CUSTOM_TYPE = clean_env("CUSTOM_TYPE", "roundtrip")  # oneway_out, oneway_in, roundtrip
+CUSTOM_TYPE = clean_env("CUSTOM_TYPE", "roundtrip")
 TRAVELPAYOUTS_MARKER = clean_env("TRAVELPAYOUTS_MARKER", "573156")
 
 HISTORY_FILE = "flight_price_history.json"
@@ -69,13 +68,6 @@ REALISTIC_PROFILES = [
         "platform": "MacIntel",
         "vendor": "Apple Computer, Inc.",
         "renderer": "Apple M2 Pro"
-    },
-    {
-        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0",
-        "viewport": {"width": 1920, "height": 1080},
-        "platform": "Win32",
-        "vendor": "",
-        "renderer": "AMD Radeon RX 6700 XT"
     }
 ]
 
@@ -164,7 +156,7 @@ def get_google_calendar_link(trip_type_label, airline, dep, ret="", price=0, url
     return f"https://calendar.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dep_clean}/{ret_clean}&details={details}&location={location}"
 
 # ==========================================
-# 📡 دوال إرسال تيليجرام مع مانع تجاوز حجم الرسالة
+# 📡 دوال إرسال تيليجرام
 # ==========================================
 def send_telegram_msg(message, reply_markup=None, high_priority=False):
     try:
@@ -186,7 +178,6 @@ def send_telegram_msg(message, reply_markup=None, high_priority=False):
         print(f"⚠️ خطأ إرسال رسالة التيليجرام: {e}")
 
 def send_telegram_long_message(msg_blocks, header=""):
-    """دالة لتقسيم الرسائل الطويلة تلقائياً وتفادي خطأ 4096 حرف في تيليجرام"""
     current_msg = header + "\n" if header else ""
     for block in msg_blocks:
         if len(current_msg) + len(block) > 3900:
@@ -504,7 +495,6 @@ def build_briefing_message(items):
     t_next = f" | ⏰ {next_weekend['وقت الإقلاع']}" if next_weekend.get("وقت الإقلاع") else ""
     t_cheap = f" | ⏰ {cheapest_overall['وقت الإقلاع']}" if cheapest_overall.get("وقت الإقلاع") else ""
 
-    # روابط الأرباح المباشرة والتتبعية
     direct_next = get_direct_booking_link(next_weekend['الناقل'], next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'], "roundtrip")
     tp_flight_next = get_affiliate_flight_link(next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'], "roundtrip")
     tp_hotel_next = get_affiliate_hotel_link(next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'])
@@ -543,6 +533,16 @@ def build_briefing_message(items):
     )
     return text
 
+# ==========================================
+# 🛡️ فلترة الموارد وحقن التخفي المتقدم
+# ==========================================
+def intercept_route_resources(route):
+    """حجب الصور والوسائط والخطوط لتوفير 65% من الذاكرة وتسريع التصفح"""
+    if route.request.resource_type in ["image", "media", "font"]:
+        route.abort()
+    else:
+        route.continue_()
+
 def create_stealth_context(browser):
     profile = random.choice(REALISTIC_PROFILES)
     context = browser.new_context(
@@ -552,7 +552,14 @@ def create_stealth_context(browser):
         viewport=profile["viewport"],
         device_scale_factor=1,
         is_mobile=False,
-        has_touch=False
+        has_touch=False,
+        extra_http_headers={
+            "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7",
+            "sec-ch-ua": '"Chromium";v="129", "Not=A?Brand";v="24", "Google Chrome";v="129"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": f'"{profile["platform"]}"',
+            "Upgrade-Insecure-Requests": "1"
+        }
     )
 
     context.add_cookies([
@@ -562,6 +569,7 @@ def create_stealth_context(browser):
 
     stealth_js = f"""
     Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
+    window.chrome = {{ runtime: {{}} }};
     Object.defineProperty(navigator, 'languages', {{ get: () => ['ar-SA', 'ar', 'en-US', 'en'] }});
     const getParameter = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function(parameter) {{
@@ -583,13 +591,13 @@ def fallback_http_probe(dep, ret="", trip_type="roundtrip"):
         url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
         "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     }
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             html = response.read().decode("utf-8", errors="ignore")
             prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{3,4})', html)
             if prices:
@@ -628,9 +636,10 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
         )
         context = create_stealth_context(browser)
         page = context.new_page()
+        page.route("**/*", intercept_route_resources)
 
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            page.goto(url, wait_until="domcontentloaded", timeout=22000)
             if "consent.google.com" in page.url:
                 try:
                     page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
@@ -640,7 +649,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
 
             page.mouse.wheel(0, random.randint(150, 300))
             try:
-                page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=6000)
+                page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=6500)
             except Exception:
                 time.sleep(2)
 
@@ -705,7 +714,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
             dir_link = get_direct_booking_link(air, dep, ret, trip_type)
             lines.append(
                 f"• <b>{f['price']} ر.س</b> — ✈️ {air}{bag_txt} (⏰ {f['time_ar']})\n"
-                f"  🔗 <a href='{dir_link}'>حجز مباشر من موقع {air} ↗</a>"
+                f"   🔗 <a href='{dir_link}'>حجز مباشر من موقع {air} ↗</a>"
             )
 
     cal_link = get_google_calendar_link(title_head, cheapest["airline"], dep, ret, cheapest["price"], url)
@@ -717,7 +726,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
     print("✅ تم إرسال تقرير المسار المخصص للتيليجرام بنجاح!")
 
 # ==========================================
-# ☁️ دورة الفحص السحابي الشامل لرحلات الويكند
+# ☁️ دورة الفحص السحابي الشامل مع إعادة التدوير
 # ==========================================
 def run_cloud_scan():
     if CUSTOM_DEP:
@@ -725,8 +734,7 @@ def run_cloud_scan():
         return
 
     start_time = time.time()
-    now_ts = int(start_time)
-    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان (درع التخفي مفعّل)...")
+    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان (درع التخفي والفلترة مفعّل)...")
     pairs = get_all_monitored_pairs(months_ahead=3)
     results = []
     hist_state = load_history()
@@ -747,29 +755,40 @@ def run_cloud_scan():
 
             context = create_stealth_context(browser)
             page = context.new_page()
+            page.route("**/*", intercept_route_resources)
 
             for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
+                # تدوير الصفحة كل 8 رحلات لتطهير الرام ومنع تسريب الذاكرة
+                if idx % 8 == 0:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+                    page = context.new_page()
+                    page.route("**/*", intercept_route_resources)
+
                 url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
                 cheapest_flight = None
                 playwright_failed = False
 
-                for attempt in range(2):
+                # محاولات ذكية مع Exponential Backoff
+                for attempt in range(3):
                     try:
-                        page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                        page.goto(url, wait_until="domcontentloaded", timeout=16000)
 
                         if "consent.google.com" in page.url:
                             try:
                                 page.locator('button:has-text("Accept all"), button:has-text("I agree")').first.click(timeout=3000)
-                                page.wait_for_load_state("domcontentloaded", timeout=5000)
+                                page.wait_for_load_state("domcontentloaded", timeout=4000)
                             except Exception:
                                 pass
 
                         page.mouse.wheel(0, random.randint(100, 250))
 
                         try:
-                            page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=4500)
+                            page.wait_for_selector("li.pIav2d, div.pIav2d", timeout=5000)
                         except Exception:
-                            time.sleep(1.5)
+                            time.sleep(1.2)
 
                         cards = page.locator("li.pIav2d, div.pIav2d").all()
                         nonstop_options = []
@@ -797,13 +816,13 @@ def run_cloud_scan():
                         else:
                             playwright_failed = True
 
-                    except Exception:
+                    except Exception as loop_e:
                         playwright_failed = True
-                        if attempt == 0:
-                            time.sleep(2)
+                        wait_backoff = (2 ** attempt) + random.uniform(0.5, 1.5)
+                        time.sleep(wait_backoff)
 
                 if playwright_failed or not cheapest_flight:
-                    print(f"⚡ تفعيل المحرك الاحتياطي (Fallback Engine) للرحلة [{dep}]...")
+                    print(f"⚡ المحرك الاحتياطي (Fallback Engine) للرحلة [{dep}]...")
                     cheapest_flight = fallback_http_probe(dep, ret, "roundtrip")
 
                 if cheapest_flight:
@@ -815,12 +834,6 @@ def run_cloud_scan():
 
                     prev_p = price_history.get(flight_key)
                     pred = analyze_price_prediction(cur_p, dep, prev_p, "roundtrip")
-
-                    diff_amount = (prev_p - cur_p) if prev_p else 0
-                    if prev_p and cur_p < prev_p:
-                        drop_pct = round((diff_amount / prev_p) * 100)
-                        if drop_pct >= 50 or diff_amount >= 60 or cur_p <= 358:
-                            print(f"🚨 صفقة مؤكدة: هبوط {drop_pct}% على رحلة {trip_type} ({cur_p} ر.س) - معالجة الإشعار الفوري عبر Code.gs")
 
                     price_history[flight_key] = cur_p
                     results.append({
@@ -837,7 +850,8 @@ def run_cloud_scan():
                         "مستوى_الثقة": pred["level"]
                     })
 
-                time.sleep(random.uniform(0.7, 1.6))
+                # تأخير عشوائي بشري (Human Jitter)
+                time.sleep(random.uniform(1.2, 2.4))
 
             browser.close()
 
@@ -857,7 +871,7 @@ def run_cloud_scan():
     save_history(hist_state)
 
     if not results:
-        print("⚠️ لم يتم رصد نتائج جديدة، تفعيل استرجاع آخر نسخة صالحة لحماية التطبيق...")
+        print("⚠️ لم يتم رصد نتائج جديدة، تفعيل استرجاع آخر نسخة صالحة...")
         if os.path.exists(MINI_APP_DATA_FILE):
             try:
                 with open(MINI_APP_DATA_FILE, "r", encoding="utf-8") as f:
@@ -888,7 +902,6 @@ def run_cloud_scan():
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
         is_morning_window = (8 <= ksa_now.hour < 10)
 
-        # 1. إرسال المخطط البياني والنشرة الذكية
         if is_manual_trigger or is_morning_window:
             generate_price_chart(results)
             briefing_text = build_briefing_message(results)
@@ -897,7 +910,6 @@ def run_cloud_scan():
                 send_telegram_photo(CHART_IMAGE_PATH, caption=caption)
             send_telegram_msg(briefing_text)
 
-        # 2. إرسال قائمة الـ 15 رحلة الأرخص مع روابط الأرباح الثلاثة لكل رحلة
         top_blocks = []
         for idx, item in enumerate(results[:15], 1):
             t_dep = item['تاريخ الذهاب']
