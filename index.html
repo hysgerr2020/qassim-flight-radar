@@ -56,7 +56,7 @@
           <p id="lastUpdateText" class="text-xs text-slate-400">جاري الاتصال بالسحابة...</p>
         </div>
       </div>
-      <button onclick="triggerRefresh()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95">
+      <button onclick="triggerRefresh()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95" title="تحديث البيانات">
         🔄
       </button>
     </div>
@@ -202,6 +202,15 @@
       return m ? m[0] : String(d).trim();
     }
 
+    function getAirlineShortName(airline) {
+      const air = String(airline || "");
+      if (air.includes("أديل") || air.toLowerCase().includes("flyadeal")) return "أديل";
+      if (air.includes("ناس") || air.toLowerCase().includes("flynas")) return "ناس";
+      if (air.includes("السعودية") || air.toLowerCase().includes("saudia")) return "السعودية";
+      if (air.includes("دمج ذكي")) return "دمج ذكي";
+      return air.split(' ')[0] || "الشركة";
+    }
+
     function buildDirectAirlineUrl(airline, dep, ret) {
       const air = airline || "";
       const depC = cleanDate(dep);
@@ -221,18 +230,18 @@
     }
 
     function buildHotelUrl(dep, ret) {
-      const checkIn = cleanDate(dep);
+      const checkIn = cleanDate(dep) || new Date().toISOString().slice(0, 10);
       const checkOut = cleanDate(ret) || checkIn;
       return `https://search.hotellook.com/?destination=Jeddah&checkIn=${checkIn}&checkOut=${checkOut}&marker=${TRAVELPAYOUTS_MARKER}&language=ar&currency=SAR`;
     }
 
-    // قراءة الكاش المحلي الفوري لتسريع التحميل
+    // قراءة الكاش المحلي الفوري لتسريع التحميل لحظياً
     function loadCachedData() {
       try {
         const cached = localStorage.getItem('qassim_radar_cache');
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (parsed.flights && parsed.flights.length > 0) {
+          if (parsed && Array.isArray(parsed.flights) && parsed.flights.length > 0) {
             processData(parsed, true);
           }
         }
@@ -243,6 +252,7 @@
 
     function processData(data, isFromCache = false) {
       marketStats = data.stats || { avg_price: 0, min_price: 0, total: 0 };
+      rawFlights = [];
 
       rawFlights = (data.flights || []).map(item => {
         const price = Number(item["السعر"] || item.price || 0);
@@ -289,7 +299,9 @@
 
       if (!isFromCache) {
         document.getElementById('lastUpdateText').innerText = "آخر فحص: " + (data.updated_at || "الآن");
-        localStorage.setItem('qassim_radar_cache', JSON.stringify(data));
+        try {
+          localStorage.setItem('qassim_radar_cache', JSON.stringify(data));
+        } catch(e) {}
       }
 
       updateStats();
@@ -316,7 +328,7 @@
       const lowest = sortedByPrice[0];
 
       document.getElementById('statLowestPrice').innerText = lowest.price;
-      document.getElementById('statLowestAirline').innerText = lowest.airline;
+      document.getElementById('statLowestAirline').innerText = getAirlineShortName(lowest.airline);
 
       const avg = marketStats.avg_price || Math.round(rawFlights.reduce((acc, cur) => acc + cur.price, 0) / rawFlights.length);
       document.getElementById('statAvgPrice').innerText = avg;
@@ -412,7 +424,6 @@
           `<div class="text-xs text-indigo-400 font-bold mt-0.5">🛫 اتجاه واحد فقط</div>` : 
           `<div class="text-xs text-slate-400 mt-0.5">عودة: <code>${cleanDate(item.ret)}</code></div>`;
 
-        // حساب نسبة التوفير مقارنة بمتوسط السوق
         let savingBadge = "";
         if (item.price < marketAvg) {
           const discountPct = Math.round(((marketAvg - item.price) / marketAvg) * 100);
@@ -423,6 +434,7 @@
 
         const directLink = buildDirectAirlineUrl(item.airline, item.dep, item.ret);
         const hotelLink = buildHotelUrl(item.dep, item.ret);
+        const shortName = getAirlineShortName(item.airline);
 
         const card = document.createElement('div');
         card.className = "bg-slate-800/70 border border-slate-700/70 rounded-2xl p-4 shadow-lg space-y-3";
@@ -477,7 +489,7 @@
           <div class="grid grid-cols-2 gap-2 pt-0.5">
             <button onclick="openBookingUrl('${directLink}')" 
                     class="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
-              <span>حجز مباشر ${item.airline.split(' ')[1] || ''}</span>
+              <span>حجز مباشر (${shortName})</span>
               <span>↗</span>
             </button>
             <button onclick="openBookingUrl('${hotelLink}')" 
@@ -491,7 +503,7 @@
       });
     }
 
-    // بدء التشغيل عبر الكاش أولاً ثم المزامنة الحية
+    // بدء التشغيل: استعراض الكاش فوراً ثم المزامنة الحية في الخلفية
     loadCachedData();
     fetchLatestData();
   </script>
