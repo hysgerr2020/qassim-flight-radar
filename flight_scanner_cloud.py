@@ -28,8 +28,10 @@ TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
 GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbwglVr2b3S7C97mMKKL2pJNct_yO3R10Fz0a3JCBsbYxtax56-tz-7_8SFwh6RubIdQJw/exec")
 GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
+# متغيرات الفحص المخصص والمسارات المنفصلة (المرحلة الأولى)
 CUSTOM_DEP = clean_env("CUSTOM_DEP", "")
 CUSTOM_RET = clean_env("CUSTOM_RET", "")
+CUSTOM_TYPE = clean_env("CUSTOM_TYPE", "roundtrip")  # oneway_out, oneway_in, roundtrip
 
 HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
@@ -91,7 +93,6 @@ def load_history():
         except Exception:
             pass
 
-    # استرجاع الأسعار السابقة تلقائياً من flights_data.json إذا كان السجل المحلي فارغاً
     if os.path.exists(MINI_APP_DATA_FILE):
         try:
             with open(MINI_APP_DATA_FILE, "r", encoding="utf-8") as f:
@@ -120,22 +121,34 @@ def save_history(hist_data):
         print(f"⚠️ فشل حفظ السجل التاريخي: {e}")
 
 
-def get_direct_booking_link(airline, dep, ret):
+def get_direct_booking_link(airline, dep, ret="", trip_type="roundtrip"):
+    """توليد روابط الحجز المباشر بدقة مع مراعاة اتجاه ومسار السفر"""
     air = airline or ""
+    origin = "JED" if trip_type == "oneway_in" else "ELQ"
+    destination = "ELQ" if trip_type == "oneway_in" else "JED"
+    is_round = (trip_type == "roundtrip" and bool(ret))
+    tt_param = "RoundTrip" if is_round else "OneWay"
+    ret_param = f"&returnDate={ret}" if is_round else ""
+
     if "أديل" in air or "flyadeal" in air.lower():
-        return f"https://www.flyadeal.com/ar/search-flight?origin=ELQ&destination=JED&departureDate={dep}&returnDate={ret}&adults=1&tripType=RoundTrip"
+        return f"https://www.flyadeal.com/ar/search-flight?origin={origin}&destination={destination}&departureDate={dep}{ret_param}&adults=1&tripType={tt_param}"
     elif "ناس" in air or "flynas" in air.lower():
-        return f"https://www.flynas.com/ar/booking/flight-search?origin=ELQ&destination=JED&departureDate={dep}&returnDate={ret}&adults=1&tripType=RoundTrip"
+        return f"https://www.flynas.com/ar/booking/flight-search?origin={origin}&destination={destination}&departureDate={dep}{ret_param}&adults=1&tripType={tt_param}"
     elif "السعودية" in air or "saudia" in air.lower():
-        return f"https://www.saudia.com/ar/booking?origin=ELQ&destination=JED&departureDate={dep}&returnDate={ret}&adults=1&tripType=RoundTrip"
-    return f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=ar&gl=sa"
+        return f"https://www.saudia.com/ar/booking?origin={origin}&destination={destination}&departureDate={dep}{ret_param}&adults=1&tripType={tt_param}"
+
+    if is_round:
+        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=ar&gl=sa"
+    else:
+        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep}%20nonstop&curr=SAR&hl=ar&gl=sa"
 
 
-def get_google_calendar_link(trip_type, airline, dep, ret, price, url):
+def get_google_calendar_link(trip_type_label, airline, dep, ret="", price=0, url=""):
+    """توليد رابط تقويم Google متوافق مع الذهاب الفردي أو الذهاب والعودة"""
     dep_clean = dep.replace("-", "")
-    ret_clean = ret.replace("-", "")
-    title = urllib.parse.quote(f"✈️ رحلة القصيم ⇄ جدة ({airline})")
-    details = urllib.parse.quote(f"🗓 {trip_type}\n💰 السعر الإجمالي: {price} ر.س\n✈️ الناقل: {airline}\n🔗 رابط الحجز: {url}")
+    ret_clean = ret.replace("-", "") if ret else dep_clean
+    title = urllib.parse.quote(f"✈️ رحلة طيران ({airline})")
+    details = urllib.parse.quote(f"🧭 المسار: {trip_type_label}\n💰 السعر: {price} ر.س\n✈️ الناقل: {airline}\n🔗 الحجز: {url}")
     location = urllib.parse.quote("مطار الأمير نايف بن عبدالعزيز (ELQ) ⇄ مطار الملك عبدالعزيز (JED)")
     return f"https://calendar.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dep_clean}/{ret_clean}&details={details}&location={location}"
 
@@ -310,28 +323,33 @@ def parse_flight_card_text(text):
 # ==========================================
 # 🔮 المسار الثاني: محرك التنبؤ الاحتمالي ومؤشر الثقة
 # ==========================================
-def analyze_price_prediction(cur_p, dep_date_str, prev_p=None):
+def analyze_price_prediction(cur_p, dep_date_str, prev_p=None, trip_type="roundtrip"):
     """
     محرك التنبؤ الاحتمالي وحساب مؤشر الثقة في قرار الشراء (0 - 100%) وتوقع مسار السعر لـ 7 أيام
+    تمت معايرته ليتكيف مع الاتجاه الفردي (ذهاب أو عودة) والاتجاه المزدوج (ذهاب وعودة).
     """
+    is_one_way = (trip_type in ["oneway_out", "oneway_in"])
+    floor_price = 179 if is_one_way else 358
+    good_price = 210 if is_one_way else 420
+    fair_price = 280 if is_one_way else 550
+
     try:
         dep_date = datetime.datetime.strptime(dep_date_str, "%Y-%m-%d").date()
         days_to_dep = (dep_date - datetime.date.today()).days
     except Exception:
         days_to_dep = 30
 
-    # 1. المعايرة مع النطاقات التاريخية لخط (القصيم ⇄ جدة)
-    if cur_p <= 358:
+    if cur_p <= floor_price:
         base_score = 96
-        forecast = "السعر في القاع التاريخي الترويجي الأدنى. غير قابل لمزيد من الهبوط وفرصة الشراء مثالية."
+        forecast = f"السعر في القاع التاريخي الترويجي الأدنى ({cur_p} ر.س). غير قابل لمزيد من الهبوط وفرصة الشراء مثالية."
         rec = "احجز فوراً (قاع تاريخي)"
         level = "high"
-    elif cur_p <= 420:
+    elif cur_p <= good_price:
         base_score = 87
         forecast = "سعر اقتصادي منخفض ومناسب جداً، مرشح للاستقرار أو الارتفاع التدريجي."
         rec = "سعر ممتاز للشراء"
         level = "high"
-    elif cur_p <= 550:
+    elif cur_p <= fair_price:
         if days_to_dep > 21:
             base_score = 58
             forecast = "سعر متوسط. توجد مهلة زمنية كافية (> 3 أسابيع) لترقب عروض ترويجية بديلة."
@@ -348,7 +366,6 @@ def analyze_price_prediction(cur_p, dep_date_str, prev_p=None):
         rec = "سعر متضخم - انتظر هبوط الفئات"
         level = "low"
 
-    # 2. وتيرة تغير السعر (Price Velocity)
     if prev_p:
         if cur_p < prev_p:
             base_score = min(99, base_score + 6)
@@ -359,8 +376,7 @@ def analyze_price_prediction(cur_p, dep_date_str, prev_p=None):
             else:
                 base_score = max(15, base_score - 8)
 
-    # 3. عامل اللحظات الأخيرة (Last-Minute Dynamic Pricing)
-    if days_to_dep <= 7 and cur_p <= 500:
+    if days_to_dep <= 7 and cur_p <= (fair_price * 0.9):
         base_score = min(98, base_score + 8)
     elif days_to_dep <= 3:
         forecast = "⏳ رحلة الأسبوع الحالي: التسعير متسارع والمقاعد المتبقية محدودة."
@@ -477,8 +493,8 @@ def build_briefing_message(items):
     t_next = f" | ⏰ {next_weekend['وقت الإقلاع']}" if next_weekend.get("وقت الإقلاع") else ""
     t_cheap = f" | ⏰ {cheapest_overall['وقت الإقلاع']}" if cheapest_overall.get("وقت الإقلاع") else ""
 
-    direct_next = get_direct_booking_link(next_weekend['الناقل'], next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'])
-    direct_cheap = get_direct_booking_link(cheapest_overall['الناقل'], cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'])
+    direct_next = get_direct_booking_link(next_weekend['الناقل'], next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'], "roundtrip")
+    direct_cheap = get_direct_booking_link(cheapest_overall['الناقل'], cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'], "roundtrip")
 
     ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
     text = (
@@ -537,10 +553,58 @@ def create_stealth_context(browser):
     return context
 
 
-def run_custom_date_probe(dep, ret):
-    """الفاحص الخاطف للتواريخ الحرة عند الطلب"""
-    print(f"🎯 بدء الفاحص الخاطف للتواريخ الحرة (درع التخفي مفعّل): {dep} ⬅ {ret}")
-    url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
+# ==========================================
+# 🛡️ المحرك الاحتياطي المزدوج (Dual-Engine Fallback)
+# ==========================================
+def fallback_http_probe(dep, ret="", trip_type="roundtrip"):
+    """
+    محرك احتياطي خفيف وسريع يعمل عبر استدعاء HTTP مباشر وبدون متصفح
+    يعمل كخط دفاع ثانٍ في حال بطء أو حظر Playwright مع دعم نوع المسار.
+    """
+    if trip_type == "oneway_out":
+        url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20nonstop&curr=SAR&hl=en&gl=sa"
+    elif trip_type == "oneway_in":
+        url = f"https://www.google.com/travel/flights?q=Flights%20from%20JED%20to%20ELQ%20on%20{dep}%20nonstop&curr=SAR&hl=en&gl=sa"
+    else:
+        url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+        "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+            prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{3,4})', html)
+            if prices:
+                valid_prices = [int(p) for p in prices if 130 <= int(p) <= 3000]
+                if valid_prices:
+                    min_p = min(valid_prices)
+                    air = "طيران أديل" if min_p <= 400 else "الخطوط السعودية"
+                    return {"price": min_p, "airline": air, "time_ar": "3:40 م", "raw_time": "3:40 PM"}
+    except Exception as err:
+        print(f"⚠️ المحرك الاحتياطي لم يتمكن من جلب السعر لـ {dep}: {err}")
+    return None
+
+
+# ==========================================
+# 🎯 الفاحص الخاطف للتواريخ والمسارات المخصصة (المرحلة الأولى)
+# ==========================================
+def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
+    """فاحص التواريخ الحرة المطور لدعم الذهاب المنفصل، العودة المنفصلة، والذهاب والعودة"""
+    if trip_type == "oneway_out":
+        title_head = "🛫 رحلة ذهاب فقط (القصيم ⬅ جدة)"
+        url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20nonstop&curr=SAR&hl=en&gl=sa"
+    elif trip_type == "oneway_in":
+        title_head = "🛬 رحلة عودة فقط (جدة ⬅ القصيم)"
+        url = f"https://www.google.com/travel/flights?q=Flights%20from%20JED%20to%20ELQ%20on%20{dep}%20nonstop&curr=SAR&hl=en&gl=sa"
+    else:
+        title_head = "🔄 رحلة ذهاب وعودة (القصيم ⇄ جدة)"
+        url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
+
+    print(f"🎯 بدء الفحص المخصص للمسار [{title_head}]: الذهاب {dep} | العودة {ret}")
     available_flights = []
 
     with sync_playwright() as p:
@@ -589,88 +653,60 @@ def run_custom_date_probe(dep, ret):
             browser.close()
 
     if not available_flights:
-        print(f"⚡ تفعيل المحرك الاحتياطي للبحث المخصص [{dep}]...")
-        fallback_res = fallback_http_probe(dep, ret)
+        print(f"⚡ تفعيل المحرك الاحتياطي للمسار المخصص [{dep}]...")
+        fallback_res = fallback_http_probe(dep, ret, trip_type)
         if fallback_res:
             available_flights.append(fallback_res)
 
     if not available_flights:
-        msg = (
-            f"🔍 <b>تقرير الفحص المخصص (القصيم ⇄ جدة)</b>\n\n"
-            f"🛫 <b>الذهاب:</b> <code>{dep}</code>\n"
-            f"🛬 <b>العودة:</b> <code>{ret}</code>\n\n"
-            f"⚠️ لم يتم العثور على رحلات مباشرة متوفرة في هذين التاريخين، أو أن المقاعد قد نفدت بالكامل.\n\n"
-            f"🔗 <a href='{url}'>فحص رحلات الترانزيت أو التواريخ المجاورة على Google Flights ↗</a>"
+        send_telegram_msg(
+            f"🔍 <b>تقرير فحص {title_head}</b>\n\n"
+            f"📅 التاريخ: <code>{dep}</code>" + (f" ⬅ <code>{ret}</code>" if ret else "") + "\n\n"
+            f"⚠️ لم يتم العثور على رحلات مباشرة متوفرة في هذا التوقيت أو نفدت المقاعد.\n\n"
+            f"🔗 <a href='{url}'>فحص الرحلات والبدائل المتاحة على Google Flights ↗</a>",
+            high_priority=True
         )
-        send_telegram_msg(msg, high_priority=True)
         return
 
     available_flights.sort(key=lambda x: x["price"])
     cheapest = available_flights[0]
+    pred = analyze_price_prediction(cheapest["price"], dep, trip_type=trip_type)
 
-    pred = analyze_price_prediction(cheapest["price"], dep)
-
+    date_display = f"<code>{dep}</code>" + (f" ⬅ <code>{ret}</code>" if ret else "")
     lines = [
-        f"🎯 <b>نتيجة الفحص المخصص الفوري (القصيم ⇄ جدة)</b>\n",
-        f"🛫 <b>تاريخ الذهاب:</b> <code>{dep}</code>\n"
-        f"🛬 <b>تاريخ العودة:</b> <code>{ret}</code>\n",
-        f"🏆 <b>أفضل خيار متاح:</b>\n"
-        f"   💰 <b>{cheapest['price']} ر.س إجمالي</b> — ✈️ {cheapest['airline']} (⏰ {cheapest['time_ar']})\n"
-        f"   🎯 <b>مؤشر الثقة في الشراء:</b> <b>{pred['score']}%</b> ({pred['recommendation']})\n"
-        f"   🔮 <b>توقع المسار:</b> <i>{pred['forecast']}</i>\n"
+        f"🎯 <b>نتيجة الفحص الفوري المباشر:</b>\n",
+        f"🧭 <b>المسار:</b> {title_head}",
+        f"📅 <b>تاريخ السفر:</b> {date_display}\n",
+        f"🏆 <b>أفضل خيار متاح:</b>",
+        f"   💰 <b>{cheapest['price']} ر.س إجمالي</b> — ✈️ {cheapest['airline']} (⏰ {cheapest['time_ar']})",
+        f"   🎯 <b>مؤشر الثقة في الشراء:</b> <b>{pred['score']}%</b> ({pred['recommendation']})",
+        f"   🔮 <b>توقع المسار:</b> <i>{pred['forecast']}</i>\n",
+        f"📋 <b>كافة الخيارات المباشرة:</b>"
     ]
 
-    seen_airlines = set()
-    lines.append("\n📋 <b>الخيارات المباشرة المتوفرة:</b>")
+    seen = set()
     for f in available_flights:
-        air_name = f["airline"]
-        if air_name not in seen_airlines:
-            seen_airlines.add(air_name)
-            bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air_name else f" (+{BAGGAGE_FEES.get(air_name, 140)} حقيبة)"
-            dir_link = get_direct_booking_link(air_name, dep, ret)
-            lines.append(f"• <b>{f['price']} ر.س</b> — ✈️ {air_name}{bag_txt}\n  🔗 <a href='{dir_link}'>حجز مباشر من {air_name} ↗</a>")
+        air = f["airline"]
+        if air not in seen:
+            seen.add(air)
+            bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air else f" (+{BAGGAGE_FEES.get(air, 140)} حقيبة)"
+            dir_link = get_direct_booking_link(air, dep, ret, trip_type)
+            lines.append(f"• <b>{f['price']} ر.س</b> — ✈️ {air}{bag_txt} (⏰ {f['time_ar']})\n  🔗 <a href='{dir_link}'>حجز مباشر من موقع {air} ↗</a>")
 
-    cal_link = get_google_calendar_link("رحلة مخصصة", cheapest["airline"], dep, ret, cheapest["price"], url)
+    cal_link = get_google_calendar_link(title_head, cheapest["airline"], dep, ret, cheapest["price"], url)
     lines.append(f"\n📅 <a href='{cal_link}'>إضافة موعد الرحلة لتقويم Google ↗</a>")
     lines.append(f"🔍 <a href='{url}'>مقارنة كافة تفاصيل الرحلة على Google Flights ↗</a>")
 
     send_telegram_msg("\n".join(lines), high_priority=True)
-    print("✅ تم إرسال تقرير الفحص المخصص للتيليجرام بنجاح!")
+    print("✅ تم إرسال تقرير المسار المخصص للتيليجرام بنجاح!")
 
 
 # ==========================================
-# 🛡️ المحرك الاحتياطي المزدوج (Dual-Engine Fallback)
+# ☁️ دورة الفحص السحابي الشامل لرحلات الويكند
 # ==========================================
-def fallback_http_probe(dep, ret):
-    """
-    محرك احتياطي خفيف وسريع يعمل عبر استدعاء HTTP مباشر وبدون متصفح
-    يعمل كخط دفاع ثانٍ في حال بطء أو حظر Playwright
-    """
-    url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=en&gl=sa"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-        "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    }
-    try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as response:
-            html = response.read().decode("utf-8", errors="ignore")
-            prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{3,4})', html)
-            if prices:
-                valid_prices = [int(p) for p in prices if 130 <= int(p) <= 3000]
-                if valid_prices:
-                    min_p = min(valid_prices)
-                    air = "طيران أديل" if min_p <= 400 else "الخطوط السعودية"
-                    return {"price": min_p, "airline": air, "time_ar": "3:40 م", "raw_time": "3:40 PM"}
-    except Exception as err:
-        print(f"⚠️ المحرك الاحتياطي لم يتمكن من جلب السعر لـ {dep}: {err}")
-    return None
-
-
 def run_cloud_scan():
-    if CUSTOM_DEP and CUSTOM_RET:
-        run_custom_date_probe(CUSTOM_DEP, CUSTOM_RET)
+    if CUSTOM_DEP:
+        run_custom_date_probe(CUSTOM_DEP, CUSTOM_RET, CUSTOM_TYPE)
         return
 
     start_time = time.time()
@@ -751,10 +787,9 @@ def run_cloud_scan():
                         if attempt == 0:
                             time.sleep(2)
 
-                # تفعيل المحرك الاحتياطي المزدوج في حال تعذر أو فشل Playwright
                 if playwright_failed or not cheapest_flight:
                     print(f"⚡ تفعيل المحرك الاحتياطي (Fallback Engine) للرحلة [{dep}]...")
-                    cheapest_flight = fallback_http_probe(dep, ret)
+                    cheapest_flight = fallback_http_probe(dep, ret, "roundtrip")
 
                 if cheapest_flight:
                     cur_p = cheapest_flight["price"]
@@ -764,14 +799,14 @@ def run_cloud_scan():
                     print(f"[{idx}/{len(pairs)}] ✅ رصد: {trip_type} -> {cur_p} ر.س ({air})")
 
                     prev_p = price_history.get(flight_key)
-                    pred = analyze_price_prediction(cur_p, dep, prev_p)
+                    pred = analyze_price_prediction(cur_p, dep, prev_p, "roundtrip")
 
-                    # تسجيل كشف الصفقات في سجلات الخادم مع تفويض الإرسال المركزي لـ Code.gs لمنع الازدواجية
+                    # تفويض إرسال تنبيهات الهبوط الساحق لـ Code.gs لمنع الازدواجية
                     diff_amount = (prev_p - cur_p) if prev_p else 0
                     if prev_p and cur_p < prev_p:
                         drop_pct = round((diff_amount / prev_p) * 100)
                         if drop_pct >= 50 or diff_amount >= 60 or cur_p <= 358:
-                            print(f"🚨 صفقة مؤكدة: هبوط {drop_pct}% على رحلة {trip_type} (السعر: {cur_p} ر.س) - معالجة الإشعار عبر Code.gs")
+                            print(f"🚨 صفقة مؤكدة: هبوط {drop_pct}% على رحلة {trip_type} ({cur_p} ر.س) - معالجة الإشعار الفوري عبر Code.gs")
 
                     price_history[flight_key] = cur_p
                     results.append({
@@ -807,7 +842,6 @@ def run_cloud_scan():
     hist_state["alerts"] = alert_history
     save_history(hist_state)
 
-    # صمام أمان سلامة البيانات (Data Integrity Guardrail)
     if not results:
         print("⚠️ لم يتم رصد نتائج جديدة، تفعيل استرجاع آخر نسخة صالحة لحماية التطبيق...")
         if os.path.exists(MINI_APP_DATA_FILE):
@@ -825,12 +859,9 @@ def run_cloud_scan():
 
     if results:
         results = sorted(results, key=lambda x: x["السعر"])
-        
-        # مزامنة البيانات مع Google Sheets متضمنة مؤشرات التنبؤ
         sync_to_google_sheets(results, duration)
         df = pd.DataFrame(results)
 
-        # تحديث ملف الـ Mini App
         ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
         mini_app_payload = {
             "updated_at": ksa_now.strftime("%Y-%m-%d %I:%M %p"),
@@ -840,7 +871,6 @@ def run_cloud_scan():
             json.dump(mini_app_payload, f, ensure_ascii=False, indent=2)
         print("📱 تم تحديث ملف بيانات التطبيق المصغر التنبؤي (flights_data.json) بنجاح!")
 
-        # التحقق من نافذة النشرة الصباحية أو التشغيل اليدوي
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
         is_morning_window = (8 <= ksa_now.hour < 10)
 
