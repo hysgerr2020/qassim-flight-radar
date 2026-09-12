@@ -14,11 +14,17 @@ on:
         description: 'تاريخ العودة (YYYY-MM-DD)'
         required: false
         default: ''
+      custom_type:
+        description: 'نوع الرحلة (oneway_out, oneway_in, roundtrip)'
+        required: false
+        default: 'roundtrip'
 
 jobs:
   scrape_and_sync:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write  # صلاحية إلزامية لنجاح git push وتحديث ملفات المستودع
 
     steps:
       - name: فحص واستخراج الكود
@@ -44,6 +50,7 @@ jobs:
           GOOGLE_SHEET_VIEW_URL: ${{ secrets.GOOGLE_SHEET_VIEW_URL }}
           CUSTOM_DEP: ${{ inputs.custom_dep }}
           CUSTOM_RET: ${{ inputs.custom_ret }}
+          CUSTOM_TYPE: ${{ inputs.custom_type || 'roundtrip' }}
         run: python flight_scanner_cloud.py
 
       - name: حفظ السجلات التاريخية في المستودع وتحديث بيانات الويب
@@ -53,4 +60,5 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add flight_price_history.json google_flights_weekends.xlsx flights_data.json || true
           git commit -m "تحديث تلقائي: بيانات الرادار والتطبيق المصغر [skip ci]" || echo "لا توجد تعديلات لحفظها"
+          git pull --rebase origin main || true
           git push || echo "فشل دفع التعديلات"
