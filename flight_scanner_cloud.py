@@ -29,7 +29,6 @@ TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
 GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbwglVr2b3S7C97mMKKL2pJNct_yO3R10Fz0a3JCBsbYxtax56-tz-7_8SFwh6RubIdQJw/exec")
 GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
-# متغيرات الفحص المخصص والمسارات المنفصلة
 CUSTOM_DEP = clean_env("CUSTOM_DEP", "")
 CUSTOM_RET = clean_env("CUSTOM_RET", "")
 CUSTOM_TYPE = clean_env("CUSTOM_TYPE", "roundtrip")
@@ -97,7 +96,10 @@ def load_history():
                     ret_val = fl.get("تاريخ العودة", fl.get("ret", ""))
                     price_val = fl.get("السعر", fl.get("price", 0))
                     if dep_val and ret_val and price_val:
-                        recovered_prices[f"{dep_val}_{ret_val}"] = price_val
+                        try:
+                            recovered_prices[f"{dep_val}_{ret_val}"] = int(price_val)
+                        except Exception:
+                            pass
                 if recovered_prices:
                     return {"prices": recovered_prices, "alerts": {}}
         except Exception:
@@ -158,26 +160,44 @@ def get_google_calendar_link(trip_type_label, airline, dep, ret="", price=0, url
     return f"https://calendar.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dep_clean}/{ret_clean}&details={details}&location={location}"
 
 # ==========================================
-# 📡 دوال إرسال تيليجرام
+# 📡 دوال إرسال تيليجرام مع الحماية التلقائية
 # ==========================================
 def send_telegram_msg(message, reply_markup=None, high_priority=False):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        params = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": "true",
-            "disable_notification": "false" if high_priority else "true"
-        }
-        if reply_markup:
-            params["reply_markup"] = json.dumps(reply_markup)
+    params = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": "true",
+        "disable_notification": "false" if high_priority else "true"
+    }
+    if reply_markup:
+        params["reply_markup"] = json.dumps(reply_markup)
 
-        payload = urllib.parse.urlencode(params).encode("utf-8")
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = urllib.parse.urlencode(params).encode("utf-8")
+    
+    try:
         req = urllib.request.Request(url, data=payload)
-        urllib.request.urlopen(req, timeout=15)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return True
+    except urllib.error.HTTPError as he:
+        # إذا رفض تيليجرام الرسالة بسبب خطأ في تنسيق HTML (كود 400)، أرسلها فوراً بدون HTML
+        if he.code == 400:
+            try:
+                clean_plain_text = re.sub(r'<[^>]+>', '', message)
+                params["text"] = clean_plain_text
+                params.pop("parse_mode", None)
+                payload_retry = urllib.parse.urlencode(params).encode("utf-8")
+                req_retry = urllib.request.Request(url, data=payload_retry)
+                with urllib.request.urlopen(req_retry, timeout=15) as _:
+                    return True
+            except Exception as retry_e:
+                print(f"⚠️ فشل إرسال النص البديل: {retry_e}")
+        else:
+            print(f"⚠️ خطأ HTTP من خادم تيليجرام: {he.code}")
     except Exception as e:
-        print(f"⚠️ خطأ إرسال رسالة التيليجرام: {e}")
+        print(f"⚠️ خطأ اتصال مع تيليجرام: {e}")
+    return False
 
 def send_telegram_long_message(msg_blocks, header=""):
     current_msg = header + "\n" if header else ""
@@ -233,7 +253,7 @@ def sync_to_google_sheets(results, execution_time_sec):
                 "dep": f"{item['تاريخ الذهاب']} ({item['وقت الإقلاع']})" if item.get("وقت الإقلاع") else item["تاريخ الذهاب"],
                 "ret": item["تاريخ العودة"],
                 "airline": item["الناقل"],
-                "price": item["السعر"],
+                "price": int(item["السعر"]),
                 "link": item["الرابط"],
                 "score": item.get("مؤشر_الثقة", 80),
                 "recommendation": item.get("توصية_القرار", "سعر مناسب"),
@@ -416,7 +436,7 @@ def generate_price_chart(items):
             d_str = it.get("تاريخ الذهاب", "")
             short_date = "/".join(d_str.split("-")[1:]) if "-" in d_str else d_str
             dates.append(short_date)
-            p = it.get("السعر", 0)
+            p = int(it.get("السعر", 0))
             prices.append(p)
             air = it.get("الناقل", "أخرى")
             c = "#8b5cf6" if "دمج ذكي" in air else color_map.get(air, "#6b7280")
@@ -481,12 +501,12 @@ def build_briefing_message(items):
 
     items_with_bags = sorted(
         items,
-        key=lambda it: it["السعر"] + BAGGAGE_FEES.get(it["الناقل"], 140)
+        key=lambda it: int(it["السعر"]) + BAGGAGE_FEES.get(it["الناقل"], 140)
     )
     best_with_bag = items_with_bags[0]
-    best_bag_price = best_with_bag["السعر"] + BAGGAGE_FEES.get(best_with_bag["الناقل"], 140)
+    best_bag_price = int(best_with_bag["السعر"]) + BAGGAGE_FEES.get(best_with_bag["الناقل"], 140)
 
-    min_p = cheapest_overall["السعر"]
+    min_p = int(cheapest_overall["السعر"])
     if min_p <= 360:
         advice = "🟢 <b>توصية الرادار:</b> الأسعار حالياً في <b>القاع التاريخي (358 ر.س أو أقل)</b>. فرصة ممتازة لتأكيد الحجوزات الآن."
     elif min_p <= 420:
@@ -601,13 +621,19 @@ def fallback_http_probe(dep, ret="", trip_type="roundtrip"):
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as response:
             html = response.read().decode("utf-8", errors="ignore")
-            prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{3,4})', html)
-            if prices:
-                valid_prices = [int(p) for p in prices if 130 <= int(p) <= 3000]
-                if valid_prices:
-                    min_p = min(valid_prices)
-                    air = "طيران أديل" if min_p <= 400 else "الخطوط السعودية"
-                    return {"price": min_p, "airline": air, "time_ar": "3:40 م", "raw_time": "3:40 PM"}
+            # رصد الأسعار من النصوص الصريحة أو مصفوفات JSON Bootstrap
+            prices = re.findall(r'(?:SAR|ر\.س)\s*([0-9]{3,4})|([0-9]{3,4})\s*(?:SAR|ر\.س)|\"SAR\",\s*([0-9]{3,4})', html)
+            valid_prices = []
+            for g1, g2, g3 in prices:
+                val = g1 or g2 or g3
+                if val:
+                    p_val = int(val)
+                    if 130 <= p_val <= 3000:
+                        valid_prices.append(p_val)
+            if valid_prices:
+                min_p = min(valid_prices)
+                air = "طيران أديل" if min_p <= 400 else "الخطوط السعودية"
+                return {"price": min_p, "airline": air, "time_ar": "3:40 م", "raw_time": "3:40 PM"}
     except Exception as err:
         print(f"⚠️ المحرك الاحتياطي لم يتمكن من جلب السعر لـ {dep}: {err}")
     return None
@@ -688,7 +714,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
         )
         return
 
-    available_flights.sort(key=lambda x: x["price"])
+    available_flights.sort(key=lambda x: int(x["price"]))
     cheapest = available_flights[0]
     pred = analyze_price_prediction(cheapest["price"], dep, trip_type=trip_type)
 
@@ -814,9 +840,9 @@ def run_cloud_scan():
                         if nonstop_options:
                             if "جمعة إلى سبت" in trip_type:
                                 pm_options = [o for o in nonstop_options if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
-                                cheapest_flight = min(pm_options, key=lambda x: x["price"]) if pm_options else min(nonstop_options, key=lambda x: x["price"])
+                                cheapest_flight = min(pm_options, key=lambda x: int(x["price"])) if pm_options else min(nonstop_options, key=lambda x: int(x["price"]))
                             else:
-                                cheapest_flight = min(nonstop_options, key=lambda x: x["price"])
+                                cheapest_flight = min(nonstop_options, key=lambda x: int(x["price"]))
                             playwright_failed = False
                             break
                         else:
@@ -832,7 +858,7 @@ def run_cloud_scan():
                     cheapest_flight = fallback_http_probe(dep, ret, "roundtrip")
 
                 if cheapest_flight:
-                    cur_p = cheapest_flight["price"]
+                    cur_p = int(cheapest_flight["price"])
                     air = cheapest_flight["airline"]
                     f_time = cheapest_flight["time_ar"]
                     flight_key = f"{dep}_{ret}"
@@ -891,7 +917,7 @@ def run_cloud_scan():
         )
 
     if results:
-        results = sorted(results, key=lambda x: x["السعر"])
+        results = sorted(results, key=lambda x: int(x["السعر"]))
         sync_to_google_sheets(results, duration)
         df = pd.DataFrame(results)
 
@@ -925,7 +951,8 @@ def run_cloud_scan():
             tp_f = get_affiliate_flight_link(t_dep, t_ret, "roundtrip")
             tp_h = get_affiliate_hotel_link(t_dep, t_ret)
 
-            price_desc = "358 ر.س إجمالي (179 ذهاب + 179 عودة)" if item['السعر'] == 358 else f"{item['السعر']} ر.س إجمالي"
+            price_val = int(item['السعر'])
+            price_desc = "358 ر.س إجمالي (179 ذهاب + 179 عودة)" if price_val == 358 else f"{price_val} ر.س إجمالي"
 
             block = (
                 f"{idx}. <b>{price_desc}</b> — ✈️ {item['الناقل']}\n"
