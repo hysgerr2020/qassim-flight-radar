@@ -19,16 +19,23 @@ on:
         required: false
         default: 'roundtrip'
 
+# منع تشغيل عمليتي فحص في نفس اللحظة لمنع أخطاء التزامن والتدافع
+concurrency:
+  group: flight-radar-engine
+  cancel-in-progress: false
+
 jobs:
   scrape_and_sync:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write  # صلاحية إلزامية لنجاح git push وتحديث ملفات المستودع
+      contents: write
 
     steps:
       - name: فحص واستخراج الكود
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: إعداد بايثون 3.11
         uses: actions/setup-python@v5
