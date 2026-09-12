@@ -28,10 +28,11 @@ TELEGRAM_CHAT_ID = clean_env("TELEGRAM_CHAT_ID", "536683079")
 GOOGLE_SHEET_WEBHOOK_URL = clean_env("GOOGLE_SHEET_WEBHOOK_URL", "https://script.google.com/macros/s/AKfycbwglVr2b3S7C97mMKKL2pJNct_yO3R10Fz0a3JCBsbYxtax56-tz-7_8SFwh6RubIdQJw/exec")
 GOOGLE_SHEET_VIEW_URL = clean_env("GOOGLE_SHEET_VIEW_URL", "https://docs.google.com/spreadsheets/d/1eozILOpDIk3KHVIyqJovDIIXTaMAM0cXpeb-Czerr9I/edit?gid=0#gid=0")
 
-# متغيرات الفحص المخصص والمسارات المنفصلة (المرحلة الأولى)
+# متغيرات الفحص المخصص والمسارات المنفصلة
 CUSTOM_DEP = clean_env("CUSTOM_DEP", "")
 CUSTOM_RET = clean_env("CUSTOM_RET", "")
 CUSTOM_TYPE = clean_env("CUSTOM_TYPE", "roundtrip")  # oneway_out, oneway_in, roundtrip
+TRAVELPAYOUTS_MARKER = clean_env("TRAVELPAYOUTS_MARKER", "573156")
 
 HISTORY_FILE = "flight_price_history.json"
 EXCEL_FILE = "google_flights_weekends.xlsx"
@@ -78,9 +79,7 @@ REALISTIC_PROFILES = [
     }
 ]
 
-
 def load_history():
-    """تحميل سجل الأسعار التاريخي مع استرجاع تلقائي من ملف الـ Mini App إن وُجد"""
     default_state = {"prices": {}, "alerts": {}}
     if os.path.exists(HISTORY_FILE):
         try:
@@ -112,7 +111,6 @@ def load_history():
 
     return default_state
 
-
 def save_history(hist_data):
     try:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
@@ -120,9 +118,10 @@ def save_history(hist_data):
     except Exception as e:
         print(f"⚠️ فشل حفظ السجل التاريخي: {e}")
 
-
+# ==========================================
+# 💰 دوال توليد الروابط المباشرة والتتبعية للأرباح
+# ==========================================
 def get_direct_booking_link(airline, dep, ret="", trip_type="roundtrip"):
-    """توليد روابط الحجز المباشر بدقة مع مراعاة اتجاه ومسار السفر"""
     air = airline or ""
     origin = "JED" if trip_type == "oneway_in" else "ELQ"
     destination = "ELQ" if trip_type == "oneway_in" else "JED"
@@ -142,9 +141,22 @@ def get_direct_booking_link(airline, dep, ret="", trip_type="roundtrip"):
     else:
         return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep}%20nonstop&curr=SAR&hl=ar&gl=sa"
 
+def get_affiliate_flight_link(dep, ret="", trip_type="roundtrip"):
+    origin = "JED" if trip_type == "oneway_in" else "ELQ"
+    destination = "ELQ" if trip_type == "oneway_in" else "JED"
+    if trip_type == "roundtrip" and ret:
+        target = f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep}%20through%20{ret}%20nonstop&curr=SAR&hl=ar&gl=sa"
+    else:
+        target = f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep}%20nonstop&curr=SAR&hl=ar&gl=sa"
+    return f"https://tp.media/r?marker={TRAVELPAYOUTS_MARKER}&trs=297424&p=4114&u={urllib.parse.quote(target)}"
+
+def get_affiliate_hotel_link(dep, ret=""):
+    checkin = dep
+    checkout = ret if ret else dep
+    target = f"https://www.booking.com/searchresults.ar.html?ss=Jeddah&checkin={checkin}&checkout={checkout}"
+    return f"https://tp.media/r?marker={TRAVELPAYOUTS_MARKER}&trs=297424&p=4115&u={urllib.parse.quote(target)}"
 
 def get_google_calendar_link(trip_type_label, airline, dep, ret="", price=0, url=""):
-    """توليد رابط تقويم Google متوافق مع الذهاب الفردي أو الذهاب والعودة"""
     dep_clean = dep.replace("-", "")
     ret_clean = ret.replace("-", "") if ret else dep_clean
     title = urllib.parse.quote(f"✈️ رحلة طيران ({airline})")
@@ -152,7 +164,9 @@ def get_google_calendar_link(trip_type_label, airline, dep, ret="", price=0, url
     location = urllib.parse.quote("مطار الأمير نايف بن عبدالعزيز (ELQ) ⇄ مطار الملك عبدالعزيز (JED)")
     return f"https://calendar.google.com/calendar/render?action=TEMPLATE&text={title}&dates={dep_clean}/{ret_clean}&details={details}&location={location}"
 
-
+# ==========================================
+# 📡 دوال إرسال تيليجرام مع مانع تجاوز حجم الرسالة
+# ==========================================
 def send_telegram_msg(message, reply_markup=None, high_priority=False):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -172,6 +186,18 @@ def send_telegram_msg(message, reply_markup=None, high_priority=False):
     except Exception as e:
         print(f"⚠️ خطأ إرسال رسالة التيليجرام: {e}")
 
+def send_telegram_long_message(msg_blocks, header=""):
+    """دالة لتقسيم الرسائل الطويلة تلقائياً وتفادي خطأ 4096 حرف في تيليجرام"""
+    current_msg = header + "\n" if header else ""
+    for block in msg_blocks:
+        if len(current_msg) + len(block) > 3900:
+            send_telegram_msg(current_msg.strip())
+            current_msg = block + "\n"
+            time.sleep(0.5)
+        else:
+            current_msg += block + "\n"
+    if current_msg.strip():
+        send_telegram_msg(current_msg.strip())
 
 def send_telegram_photo(photo_path, caption=""):
     try:
@@ -198,9 +224,7 @@ def send_telegram_photo(photo_path, caption=""):
     except Exception as e:
         print(f"⚠️ فشل إرسال صورة الرسم البياني: {e}")
 
-
 def sync_to_google_sheets(results, execution_time_sec):
-    """مزامنة كافة الرحلات مع Google Sheets متضمنة مؤشرات التنبؤ ومستوى الثقة"""
     if not GOOGLE_SHEET_WEBHOOK_URL.startswith("http"):
         print(f"⚠️ رابط الويب هوك غير صالح: {GOOGLE_SHEET_WEBHOOK_URL}")
         return
@@ -240,7 +264,6 @@ def sync_to_google_sheets(results, execution_time_sec):
     except Exception as e:
         print(f"⚠️ خطأ رفع البيانات للشيت: {e}")
 
-
 def get_all_monitored_pairs(months_ahead=3):
     today = datetime.date.today()
     end_date = today + datetime.timedelta(days=months_ahead * 30)
@@ -278,7 +301,6 @@ def get_all_monitored_pairs(months_ahead=3):
 
     return pairs
 
-
 def parse_airline_name(text):
     t = text.lower()
     found = []
@@ -294,7 +316,6 @@ def parse_airline_name(text):
     elif len(found) == 1:
         return found[0]
     return "رحلة مباشرة"
-
 
 def parse_flight_card_text(text):
     time_ar = ""
@@ -319,15 +340,10 @@ def parse_flight_card_text(text):
     airline = parse_airline_name(text)
     return price, airline, time_ar, raw_time
 
-
 # ==========================================
-# 🔮 المسار الثاني: محرك التنبؤ الاحتمالي ومؤشر الثقة
+# 🔮 محرك التنبؤ الاحتمالي ومؤشر الثقة
 # ==========================================
 def analyze_price_prediction(cur_p, dep_date_str, prev_p=None, trip_type="roundtrip"):
-    """
-    محرك التنبؤ الاحتمالي وحساب مؤشر الثقة في قرار الشراء (0 - 100%) وتوقع مسار السعر لـ 7 أيام
-    تمت معايرته ليتكيف مع الاتجاه الفردي (ذهاب أو عودة) والاتجاه المزدوج (ذهاب وعودة).
-    """
     is_one_way = (trip_type in ["oneway_out", "oneway_in"])
     floor_price = 179 if is_one_way else 358
     good_price = 210 if is_one_way else 420
@@ -389,14 +405,12 @@ def analyze_price_prediction(cur_p, dep_date_str, prev_p=None, trip_type="roundt
         "level": level
     }
 
-
 def generate_price_chart(items):
     if not items:
         return False
 
     try:
         chronological = sorted(items, key=lambda x: str(x.get("تاريخ الذهاب", "")))
-
         dates = []
         prices = []
         colors = []
@@ -421,7 +435,6 @@ def generate_price_chart(items):
         ax.set_facecolor('#ffffff')
 
         plt.plot(range(len(dates)), prices, color='#cbd5e1', linestyle='--', linewidth=1.5, zorder=1)
-
         for i in range(len(dates)):
             plt.scatter(i, prices[i], color=colors[i], s=75, zorder=3, edgecolors='white', linewidth=1.2)
 
@@ -456,7 +469,6 @@ def generate_price_chart(items):
     except Exception as e:
         print(f"⚠️ خطأ بالرسم البياني: {e}")
         return False
-
 
 def build_briefing_message(items):
     if not items:
@@ -493,8 +505,16 @@ def build_briefing_message(items):
     t_next = f" | ⏰ {next_weekend['وقت الإقلاع']}" if next_weekend.get("وقت الإقلاع") else ""
     t_cheap = f" | ⏰ {cheapest_overall['وقت الإقلاع']}" if cheapest_overall.get("وقت الإقلاع") else ""
 
+    # روابط الأرباح المباشرة والتتبعية
     direct_next = get_direct_booking_link(next_weekend['الناقل'], next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'], "roundtrip")
+    tp_flight_next = get_affiliate_flight_link(next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'], "roundtrip")
+    tp_hotel_next = get_affiliate_hotel_link(next_weekend['تاريخ الذهاب'], next_weekend['تاريخ العودة'])
+
     direct_cheap = get_direct_booking_link(cheapest_overall['الناقل'], cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'], "roundtrip")
+    tp_flight_cheap = get_affiliate_flight_link(cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'], "roundtrip")
+    tp_hotel_cheap = get_affiliate_hotel_link(cheapest_overall['تاريخ الذهاب'], cheapest_overall['تاريخ العودة'])
+
+    tp_hotel_bag = get_affiliate_hotel_link(best_with_bag['تاريخ الذهاب'], best_with_bag['تاريخ العودة'])
 
     ksa_now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
     text = (
@@ -505,23 +525,26 @@ def build_briefing_message(items):
         f"   🛫 ذهاب: <code>{next_weekend['تاريخ الذهاب']}</code> ⬅ عودة: <code>{next_weekend['تاريخ العودة']}</code>\n"
         f"   💰 <b>السعر الإجمالي:</b> <b>{next_weekend['السعر']} ر.س</b> — ✈️ {next_weekend['الناقل']}\n"
         f"   🎯 <b>مؤشر الثقة:</b> <b>{next_weekend.get('مؤشر_الثقة', 80)}%</b> ({next_weekend.get('توصية_القرار', 'سعر مناسب')})\n"
-        f"   ✈️ <a href='{direct_next}'>حجز مباشر من موقع {next_weekend['الناقل']} ↗</a>\n\n"
+        f"   ✈️ <a href='{direct_next}'>حجز مباشر من موقع {next_weekend['الناقل']} ↗</a>\n"
+        f"   🔍 <a href='{tp_flight_next}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
+        f"   🏨 <a href='{tp_hotel_next}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
         f"🎒 <b>2. أرخص تذكرة خفيفة (بدون شحن):</b>\n"
         f"   💰 <b>{cheapest_overall['السعر']} ر.س إجمالي</b> ({cheapest_overall['نوع العطلة']})\n"
         f"   ✈️ {cheapest_overall['الناقل']}{t_cheap}\n"
         f"   🎯 <b>مؤشر الثقة:</b> <b>{cheapest_overall.get('مؤشر_الثقة', 95)}%</b>\n"
-        f"   ✈️ <a href='{direct_cheap}'>حجز تذكرة القاع مباشرة ↗</a>\n\n"
+        f"   ✈️ <a href='{direct_cheap}'>حجز تذكرة القاع مباشرة ↗</a>\n"
+        f"   🔍 <a href='{tp_flight_cheap}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
+        f"   🏨 <a href='{tp_hotel_cheap}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
         f"🧳 <b>3. أفضل صفقة شاملة حقيبة شحن (20kg):</b>\n"
         f"   💰 <b>{best_bag_price} ر.س إجمالي</b> — ✈️ {best_with_bag['الناقل']}\n"
-        f"   🗓 {best_with_bag['نوع العطلة']} (<code>{best_with_bag['تاريخ الذهاب']}</code>)\n\n"
+        f"   🗓 {best_with_bag['نوع العطلة']} (<code>{best_with_bag['تاريخ الذهاب']}</code>)\n"
+        f"   🏨 <a href='{tp_hotel_bag}'>عروض فنادق جدة لهذه العطلة ↗</a>\n\n"
         f"{advice}\n\n"
         f"📊 <a href='{GOOGLE_SHEET_VIEW_URL}'>فتح جدول Google Sheets المباشر والأرشيف</a>"
     )
     return text
 
-
 def create_stealth_context(browser):
-    """إنشاء سياق تصفح متخفٍ ومحصن بمحاكاة السلوك البشري"""
     profile = random.choice(REALISTIC_PROFILES)
     context = browser.new_context(
         locale="ar-SA",
@@ -552,15 +575,7 @@ def create_stealth_context(browser):
     context.add_init_script(stealth_js)
     return context
 
-
-# ==========================================
-# 🛡️ المحرك الاحتياطي المزدوج (Dual-Engine Fallback)
-# ==========================================
 def fallback_http_probe(dep, ret="", trip_type="roundtrip"):
-    """
-    محرك احتياطي خفيف وسريع يعمل عبر استدعاء HTTP مباشر وبدون متصفح
-    يعمل كخط دفاع ثانٍ في حال بطء أو حظر Playwright مع دعم نوع المسار.
-    """
     if trip_type == "oneway_out":
         url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20nonstop&curr=SAR&hl=en&gl=sa"
     elif trip_type == "oneway_in":
@@ -588,12 +603,7 @@ def fallback_http_probe(dep, ret="", trip_type="roundtrip"):
         print(f"⚠️ المحرك الاحتياطي لم يتمكن من جلب السعر لـ {dep}: {err}")
     return None
 
-
-# ==========================================
-# 🎯 الفاحص الخاطف للتواريخ والمسارات المخصصة (المرحلة الأولى)
-# ==========================================
 def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
-    """فاحص التواريخ الحرة المطور لدعم الذهاب المنفصل، العودة المنفصلة، والذهاب والعودة"""
     if trip_type == "oneway_out":
         title_head = "🛫 رحلة ذهاب فقط (القصيم ⬅ جدة)"
         url = f"https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20{dep}%20nonstop&curr=SAR&hl=en&gl=sa"
@@ -685,21 +695,27 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
     ]
 
     seen = set()
+    tp_flight_probe = get_affiliate_flight_link(dep, ret, trip_type)
+    tp_hotel_probe = get_affiliate_hotel_link(dep, ret)
+
     for f in available_flights:
         air = f["airline"]
         if air not in seen:
             seen.add(air)
             bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air else f" (+{BAGGAGE_FEES.get(air, 140)} حقيبة)"
             dir_link = get_direct_booking_link(air, dep, ret, trip_type)
-            lines.append(f"• <b>{f['price']} ر.س</b> — ✈️ {air}{bag_txt} (⏰ {f['time_ar']})\n  🔗 <a href='{dir_link}'>حجز مباشر من موقع {air} ↗</a>")
+            lines.append(
+                f"• <b>{f['price']} ر.س</b> — ✈️ {air}{bag_txt} (⏰ {f['time_ar']})\n"
+                f"  🔗 <a href='{dir_link}'>حجز مباشر من موقع {air} ↗</a>"
+            )
 
     cal_link = get_google_calendar_link(title_head, cheapest["airline"], dep, ret, cheapest["price"], url)
-    lines.append(f"\n📅 <a href='{cal_link}'>إضافة موعد الرحلة لتقويم Google ↗</a>")
-    lines.append(f"🔍 <a href='{url}'>مقارنة كافة تفاصيل الرحلة على Google Flights ↗</a>")
+    lines.append(f"\n🔍 <a href='{tp_flight_probe}'><b>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</b></a>")
+    lines.append(f"🏨 <a href='{tp_hotel_probe}'><b>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</b></a>")
+    lines.append(f"📅 <a href='{cal_link}'>إضافة موعد الرحلة لتقويم Google ↗</a>")
 
     send_telegram_msg("\n".join(lines), high_priority=True)
     print("✅ تم إرسال تقرير المسار المخصص للتيليجرام بنجاح!")
-
 
 # ==========================================
 # ☁️ دورة الفحص السحابي الشامل لرحلات الويكند
@@ -801,7 +817,6 @@ def run_cloud_scan():
                     prev_p = price_history.get(flight_key)
                     pred = analyze_price_prediction(cur_p, dep, prev_p, "roundtrip")
 
-                    # تفويض إرسال تنبيهات الهبوط الساحق لـ Code.gs لمنع الازدواجية
                     diff_amount = (prev_p - cur_p) if prev_p else 0
                     if prev_p and cur_p < prev_p:
                         drop_pct = round((diff_amount / prev_p) * 100)
@@ -874,6 +889,7 @@ def run_cloud_scan():
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
         is_morning_window = (8 <= ksa_now.hour < 10)
 
+        # 1. إرسال المخطط البياني والنشرة الذكية
         if is_manual_trigger or is_morning_window:
             generate_price_chart(results)
             briefing_text = build_briefing_message(results)
@@ -882,11 +898,37 @@ def run_cloud_scan():
                 send_telegram_photo(CHART_IMAGE_PATH, caption=caption)
             send_telegram_msg(briefing_text)
 
+        # 2. إرسال قائمة الـ 15 رحلة الأرخص مع روابط الأرباح الثلاثة لكل رحلة
+        top_blocks = []
+        for idx, item in enumerate(results[:15], 1):
+            t_dep = item['تاريخ الذهاب']
+            t_ret = item['تاريخ العودة']
+            t_time = f" | ⏰ الإقلاع: {item['وقت الإقلاع']}" if item.get('وقت الإقلاع') else ""
+            
+            dir_link = get_direct_booking_link(item['الناقل'], t_dep, t_ret, "roundtrip")
+            tp_f = get_affiliate_flight_link(t_dep, t_ret, "roundtrip")
+            tp_h = get_affiliate_hotel_link(t_dep, t_ret)
+
+            price_desc = "358 ر.س إجمالي (179 ذهاب + 179 عودة)" if item['السعر'] == 358 else f"{item['السعر']} ر.س إجمالي"
+
+            block = (
+                f"{idx}. <b>{price_desc}</b> — ✈️ {item['الناقل']}\n"
+                f"   🗓 {item['نوع العطلة']}{t_time}\n"
+                f"   🛫 ذهاب: <code>{t_dep}</code>\n"
+                f"   🛬 عودة: <code>{t_ret}</code>\n"
+                f"   🔗 <a href='{dir_link}'>حجز مباشر من {item['الناقل']} ↗</a>\n"
+                f"   🔍 <a href='{tp_f}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
+                f"   🏨 <a href='{tp_h}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n"
+            )
+            top_blocks.append(block)
+
+        header_title = "✅ <b>اكتمل الفحص ومقارنة العروض بنجاح!</b>\n\n🎒 <b>أرخص التذاكر الخفيفة (السعر الإجمالي ذهاب وعودة):</b>\n"
+        send_telegram_long_message(top_blocks, header=header_title)
+
         df.to_excel(EXCEL_FILE, index=False)
         print(f"✅ اكتملت الدورة السحابية بنجاح في {duration} ثانية! تم رصد {len(results)} رحلة.")
     else:
         send_telegram_msg("⚠️🚨 تحذير: تعذر الوصول إلى نتائج الفحص ولم يتوفر أرشيف احتياطي!", high_priority=True)
-
 
 if __name__ == "__main__":
     run_cloud_scan()
