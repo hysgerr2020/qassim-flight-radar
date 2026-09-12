@@ -2,15 +2,15 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta name="mitgo-verification" content="fb1261cd-f2f5-4d9b-a042-8c27b686e498" />
-<script nowprocket data-noptimize="1" data-cfasync="false" data-wpfc-render="false" seraph-accel-crit="1" data-no-defer="1" data-cmp-ab="2">
-(function () {
-  var script = document.createElement("script");
-  script.async = 1;
-  script.setAttribute("data-cmp-ab","2");
-  script.src = 'https://emrldco.com/NTczMTU2.js?t=573156';
-  document.head.appendChild(script);
-})();
-</script>
+  <script nowprocket data-noptimize="1" data-cfasync="false" data-wpfc-render="false" seraph-accel-crit="1" data-no-defer="1" data-cmp-ab="2">
+  (function () {
+    var script = document.createElement("script");
+    script.async = 1;
+    script.setAttribute("data-cmp-ab","2");
+    script.src = 'https://emrldco.com/NTczMTU2.js?t=573156';
+    document.head.appendChild(script);
+  })();
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>رادار طيران القصيم ⇄ جدة الذكي</title>
@@ -53,7 +53,7 @@
         </div>
         <div>
           <h1 class="text-base font-extrabold text-white leading-tight">رادار طيران القصيم ⇄ جدة</h1>
-          <p id="lastUpdateText" class="text-xs text-slate-400">جاري مزامنة الأسعار الحية...</p>
+          <p id="lastUpdateText" class="text-xs text-slate-400">جاري الاتصال بالسحابة...</p>
         </div>
       </div>
       <button onclick="triggerRefresh()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95">
@@ -65,22 +65,31 @@
   <main class="px-4 py-4 space-y-4 max-w-lg mx-auto">
 
     <!-- Overview Stat Cards -->
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-3 gap-2.5">
       <div class="bg-slate-800/70 border border-slate-700/60 rounded-2xl p-3">
-        <span class="text-xs text-slate-400 block mb-1">أرخص سعر مرصود</span>
+        <span class="text-[11px] text-slate-400 block mb-1">أرخص سعر</span>
         <div class="flex items-baseline space-x-1 space-x-reverse">
-          <span id="statLowestPrice" class="text-2xl font-black text-emerald-400">--</span>
-          <span class="text-xs text-emerald-400/80">ر.س</span>
+          <span id="statLowestPrice" class="text-xl font-black text-emerald-400">--</span>
+          <span class="text-[10px] text-emerald-400/80">ر.س</span>
         </div>
-        <span id="statLowestAirline" class="text-[11px] text-slate-400 truncate block mt-0.5">--</span>
+        <span id="statLowestAirline" class="text-[10px] text-slate-400 truncate block mt-0.5">--</span>
       </div>
 
       <div class="bg-slate-800/70 border border-slate-700/60 rounded-2xl p-3">
-        <span class="text-xs text-slate-400 block mb-1">أعلى مؤشر ثقة للشراء</span>
-        <div id="statDecisionBadge" class="text-base font-black text-slate-200 mt-0.5">
-          ⏳ جاري الحساب...
+        <span class="text-[11px] text-slate-400 block mb-1">متوسط السوق</span>
+        <div class="flex items-baseline space-x-1 space-x-reverse">
+          <span id="statAvgPrice" class="text-xl font-black text-indigo-400">--</span>
+          <span class="text-[10px] text-indigo-400/80">ر.س</span>
         </div>
-        <span id="statDecisionSub" class="text-[11px] text-slate-400 truncate block mt-0.5">خوارزمية التنبؤ الاحتمالي</span>
+        <span class="text-[10px] text-slate-400 truncate block mt-0.5">مؤشر مرجعي</span>
+      </div>
+
+      <div class="bg-slate-800/70 border border-slate-700/60 rounded-2xl p-3">
+        <span class="text-[11px] text-slate-400 block mb-1">أعلى ثقة شراء</span>
+        <div id="statDecisionBadge" class="text-sm font-black text-slate-200 mt-0.5">
+          --
+        </div>
+        <span id="statDecisionSub" class="text-[10px] text-slate-400 truncate block mt-0.5">القرار الآلي</span>
       </div>
     </div>
 
@@ -124,6 +133,9 @@
       <button onclick="setFilter('all')" id="filter-all" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-indigo-600 text-white shadow-sm transition">
         الكل
       </button>
+      <button onclick="setFilter('deals')" id="filter-deals" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-slate-800 text-slate-300 border border-slate-700 transition">
+        🔥 قيعان وصفقات (≤ 390)
+      </button>
       <button onclick="setFilter('high_confidence')" id="filter-high_confidence" class="filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap bg-slate-800 text-slate-300 border border-slate-700 transition">
         🎯 صفقات مؤكدة (85%+)
       </button>
@@ -141,7 +153,7 @@
     <!-- Flight Cards Container -->
     <div id="flightsList" class="space-y-3">
       <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-6 text-center text-slate-400">
-        جاري مزامنة وحساب مسارات الأسعار...
+        جاري تحميل الرحلات...
       </div>
     </div>
 
@@ -154,7 +166,9 @@
       tg.expand();
     }
 
+    const TRAVELPAYOUTS_MARKER = "573156";
     let rawFlights = [];
+    let marketStats = { avg_price: 0, min_price: 0, total: 0 };
     let activeFilter = 'all';
 
     function triggerHaptic(type = 'light') {
@@ -165,7 +179,7 @@
 
     function triggerRefresh() {
       triggerHaptic('medium');
-      fetchLatestData();
+      fetchLatestData(true);
     }
 
     function handleSliderChange() {
@@ -173,7 +187,6 @@
       renderFlights();
     }
 
-    // الدالة الآمنة لفتح الروابط الخارجية عبر تيليجرام
     function openBookingUrl(url) {
       triggerHaptic('light');
       if (tg && tg.openLink) {
@@ -183,70 +196,117 @@
       }
     }
 
-    async function fetchLatestData() {
+    function cleanDate(d) {
+      if (!d) return "";
+      const m = String(d).match(/\b\d{4}-\d{2}-\d{2}\b/);
+      return m ? m[0] : String(d).trim();
+    }
+
+    function buildDirectAirlineUrl(airline, dep, ret) {
+      const air = airline || "";
+      const depC = cleanDate(dep);
+      const retC = cleanDate(ret);
+      const isRound = Boolean(retC);
+      const ttParam = isRound ? "RoundTrip" : "OneWay";
+      const retParam = isRound ? `&returnDate=${retC}` : "";
+
+      if (air.includes("أديل") || air.toLowerCase().includes("flyadeal")) {
+        return `https://www.flyadeal.com/ar/search-flight?origin=ELQ&destination=JED&departureDate=${depC}${retParam}&adults=1&tripType=${ttParam}`;
+      } else if (air.includes("ناس") || air.toLowerCase().includes("flynas")) {
+        return `https://www.flynas.com/ar/booking/flight-search?origin=ELQ&destination=JED&departureDate=${depC}${retParam}&adults=1&tripType=${ttParam}`;
+      } else if (air.includes("السعودية") || air.toLowerCase().includes("saudia")) {
+        return `https://www.saudia.com/ar/booking?origin=ELQ&destination=JED&departureDate=${depC}${retParam}&adults=1&tripType=${ttParam}`;
+      }
+      return `https://www.google.com/travel/flights?q=Flights%20from%20ELQ%20to%20JED%20on%20${depC}${isRound ? '%20through%20' + retC : ''}%20nonstop&curr=SAR&hl=ar&gl=sa`;
+    }
+
+    function buildHotelUrl(dep, ret) {
+      const checkIn = cleanDate(dep);
+      const checkOut = cleanDate(ret) || checkIn;
+      return `https://search.hotellook.com/?destination=Jeddah&checkIn=${checkIn}&checkOut=${checkOut}&marker=${TRAVELPAYOUTS_MARKER}&language=ar&currency=SAR`;
+    }
+
+    // قراءة الكاش المحلي الفوري لتسريع التحميل
+    function loadCachedData() {
+      try {
+        const cached = localStorage.getItem('qassim_radar_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed.flights && parsed.flights.length > 0) {
+            processData(parsed, true);
+          }
+        }
+      } catch (e) {
+        console.warn("فشل قراءة الذاكرة المؤقتة:", e);
+      }
+    }
+
+    function processData(data, isFromCache = false) {
+      marketStats = data.stats || { avg_price: 0, min_price: 0, total: 0 };
+
+      rawFlights = (data.flights || []).map(item => {
+        const price = Number(item["السعر"] || item.price || 0);
+        let score = item["مؤشر_الثقة"] || item.score || 50;
+        let rec = item["توصية_القرار"] || item.recommendation || "راقب السعر";
+        let forecast = item["توقعات_7_أيام"] || item.forecast || "السعر ضمن النطاق الطبيعي.";
+        let level = item["مستوى_الثقة"] || item.level || "medium";
+
+        if (!item["مؤشر_الثقة"] && !item.score) {
+          if (price <= 358) {
+            score = 96; rec = "احجز فوراً (قاع تاريخي)";
+            forecast = "السعر في القاع الترويجي الأدنى."; level = "high";
+          } else if (price <= 420) {
+            score = 87; rec = "سعر اقتصادي ممتاز";
+            forecast = "سعر مناسب جداً داخل نافذة الشراء الآمنة."; level = "high";
+          } else if (price <= 550) {
+            score = 65; rec = "سعر متوسط";
+            forecast = "إمكانية طرح مقاعد مخفضة لاحقاً."; level = "medium";
+          } else {
+            score = 30; rec = "سعر متضخم";
+            forecast = "المقاعد الاقتصادية غير متوفرة حالياً."; level = "low";
+          }
+        }
+
+        const depVal = item["تاريخ الذهاب"] || item.dep || "";
+        const timeVal = item["وقت الإقلاع"] || item.time || item.time_ar || "";
+        const retVal = item["تاريخ العودة"] || item.ret || "";
+        const airlineVal = item["الناقل"] || item.airline || "رحلة مباشرة";
+
+        return {
+          trip_type: item["نوع العطلة"] || item.trip_type || "رحلة مباشرة",
+          dep: depVal,
+          time: timeVal,
+          ret: retVal,
+          airline: airlineVal,
+          price: price,
+          link: item["الرابط"] || item.link || buildDirectAirlineUrl(airlineVal, depVal, retVal),
+          score: score,
+          recommendation: rec,
+          forecast: forecast,
+          level: level
+        };
+      });
+
+      if (!isFromCache) {
+        document.getElementById('lastUpdateText').innerText = "آخر فحص: " + (data.updated_at || "الآن");
+        localStorage.setItem('qassim_radar_cache', JSON.stringify(data));
+      }
+
+      updateStats();
+      renderFlights();
+    }
+
+    async function fetchLatestData(forceRefresh = false) {
       try {
         const res = await fetch('./flights_data.json?v=' + Date.now());
-        if (!res.ok) throw new Error("تعذر جلب ملف البيانات");
+        if (!res.ok) throw new Error("تعذر جلب البيانات السحابية");
         const data = await res.json();
-        
-        rawFlights = (data.flights || []).map(item => {
-          const price = Number(item["السعر"] || item.price || 0);
-          
-          let score = item["مؤشر_الثقة"] || item.score || 50;
-          let rec = item["توصية_القرار"] || item.recommendation || "راقب السعر";
-          let forecast = item["توقعات_7_أيام"] || item.forecast || "السعر ضمن النطاق الطبيعي للخط.";
-          let level = item["مستوى_الثقة"] || item.level || "medium";
-
-          // في حال عدم توفر مؤشرات التنبؤ نحسبها لحظياً
-          if (!item["مؤشر_الثقة"] && !item.score) {
-            if (price <= 358) {
-              score = 96;
-              rec = "احجز فوراً (قاع تاريخي)";
-              forecast = "السعر في القاع التاريخي، فرصة مثالية ومحمية من الهبوط.";
-              level = "high";
-            } else if (price <= 420) {
-              score = 87;
-              rec = "سعر اقتصادي ممتاز";
-              forecast = "سعر آمن للحجز، مرشح للاستقرار أو الارتفاع التدريجي.";
-              level = "high";
-            } else if (price <= 550) {
-              score = 65;
-              rec = "سعر متوسط";
-              forecast = "توجد إمكانية لطرح مقاعد مخفضة لاحقاً.";
-              level = "medium";
-            } else {
-              score = 30;
-              rec = "سعر متضخم";
-              forecast = "المقاعد الاقتصادية غير متوفرة حالياً، يفضل الانتظار.";
-              level = "low";
-            }
-          }
-
-          let depVal = item["تاريخ الذهاب"] || item.dep || "";
-          let timeVal = item["وقت الإقلاع"] || item.time || "";
-          let retVal = item["تاريخ العودة"] || item.ret || "";
-
-          return {
-            trip_type: item["نوع العطلة"] || item.trip_type || "رحلة مباشرة",
-            dep: depVal,
-            time: timeVal,
-            ret: retVal,
-            airline: item["الناقل"] || item.airline || "رحلة مباشرة",
-            price: price,
-            link: item["الرابط"] || item.link || "https://www.google.com/travel/flights",
-            score: score,
-            recommendation: rec,
-            forecast: forecast,
-            level: level
-          };
-        });
-
-        document.getElementById('lastUpdateText').innerText = "آخر فحص: " + (data.updated_at || "الآن");
-        updateStats();
-        renderFlights();
+        processData(data, false);
       } catch (err) {
         console.error("خطأ في جلب البيانات:", err);
-        document.getElementById('lastUpdateText').innerText = "⚠️ تعذر قراءة البيانات السحابية";
+        if (rawFlights.length === 0) {
+          document.getElementById('lastUpdateText').innerText = "⚠️ تعذر قراءة البيانات السحابية";
+        }
       }
     }
 
@@ -256,14 +316,17 @@
       const lowest = sortedByPrice[0];
 
       document.getElementById('statLowestPrice').innerText = lowest.price;
-      document.getElementById('statLowestAirline').innerText = lowest.airline + " (" + lowest.trip_type + ")";
+      document.getElementById('statLowestAirline').innerText = lowest.airline;
+
+      const avg = marketStats.avg_price || Math.round(rawFlights.reduce((acc, cur) => acc + cur.price, 0) / rawFlights.length);
+      document.getElementById('statAvgPrice').innerText = avg;
 
       const highestScoreItem = [...rawFlights].sort((a, b) => b.score - a.score)[0];
       const badgeEl = document.getElementById('statDecisionBadge');
       const subEl = document.getElementById('statDecisionSub');
 
-      badgeEl.innerHTML = `<span class="text-emerald-400 font-bold">${highestScoreItem.score}%</span> <span class="text-xs text-slate-300 font-normal">(${highestScoreItem.recommendation})</span>`;
-      subEl.innerText = `${highestScoreItem.trip_type} (${highestScoreItem.price} ر.س)`;
+      badgeEl.innerHTML = `<span class="text-emerald-400 font-bold">${highestScoreItem.score}%</span>`;
+      subEl.innerText = `${highestScoreItem.recommendation}`;
     }
 
     function setFilter(type) {
@@ -292,7 +355,9 @@
 
       let filtered = [...rawFlights];
 
-      if (activeFilter === 'high_confidence') {
+      if (activeFilter === 'deals') {
+        filtered = filtered.filter(x => x.price <= 390);
+      } else if (activeFilter === 'high_confidence') {
         filtered = filtered.filter(x => x.score >= 85);
       } else if (activeFilter === 'adeal') {
         filtered = filtered.filter(x => x.airline.includes("أديل"));
@@ -312,12 +377,13 @@
         return;
       }
 
+      const marketAvg = marketStats.avg_price || 420;
+
       filtered.forEach(item => {
         const isOneWay = !item.ret || item.ret.trim() === "";
         let bagFee = 0;
         if (!item.airline.includes("السعودية")) {
           const perBagFee = item.airline.includes("ناس") ? 150 : 140;
-          // في حال كانت الرحلة اتجاه واحد تكون رسوم الشحن للنصف
           bagFee = (isOneWay ? (perBagFee / 2) : perBagFee) * bags;
         }
         const finalPrice = Math.round((item.price * pax) + bagFee);
@@ -337,33 +403,46 @@
         if (item.airline.includes("ناس")) airlineColor = "bg-amber-950 text-amber-400 border-amber-800/60";
         if (item.airline.includes("السعودية")) airlineColor = "bg-blue-950 text-blue-300 border-blue-800/60";
 
-        // ضبط عرض التاريخ لعدم تكرار الوقت
         let timeDisplay = "";
         if (item.time && !item.dep.includes(item.time)) {
           timeDisplay = `(${item.time})`;
         }
 
-        // عرض العودة بذكاء: إما تاريخ العودة أو وسم اتجاه واحد
         const returnHtml = isOneWay ? 
-          `<div class="text-xs text-indigo-400 font-bold mt-0.5">🛫 اتجاه واحد فقط</div>` :
-          `<div class="text-xs text-slate-400 mt-0.5">عودة: <code>${item.ret}</code></div>`;
+          `<div class="text-xs text-indigo-400 font-bold mt-0.5">🛫 اتجاه واحد فقط</div>` : 
+          `<div class="text-xs text-slate-400 mt-0.5">عودة: <code>${cleanDate(item.ret)}</code></div>`;
+
+        // حساب نسبة التوفير مقارنة بمتوسط السوق
+        let savingBadge = "";
+        if (item.price < marketAvg) {
+          const discountPct = Math.round(((marketAvg - item.price) / marketAvg) * 100);
+          if (discountPct >= 10) {
+            savingBadge = `<span class="text-[10px] font-extrabold text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-700/60">وفر ${discountPct}%</span>`;
+          }
+        }
+
+        const directLink = buildDirectAirlineUrl(item.airline, item.dep, item.ret);
+        const hotelLink = buildHotelUrl(item.dep, item.ret);
 
         const card = document.createElement('div');
         card.className = "bg-slate-800/70 border border-slate-700/70 rounded-2xl p-4 shadow-lg space-y-3";
 
         card.innerHTML = `
           <div class="flex items-center justify-between border-b border-slate-700/50 pb-2.5">
-            <span class="px-2.5 py-0.5 rounded-lg text-xs font-bold border ${airlineColor}">
-              ✈️ ${item.airline}
-            </span>
+            <div class="flex items-center gap-1.5">
+              <span class="px-2.5 py-0.5 rounded-lg text-xs font-bold border ${airlineColor}">
+                ✈️ ${item.airline}
+              </span>
+              ${savingBadge}
+            </div>
             <span class="text-xs text-slate-400 font-medium">${item.trip_type}</span>
           </div>
 
           <div class="flex items-center justify-between">
             <div>
-              <div class="text-xs text-slate-400">مواعيد الرحلة</div>
+              <div class="text-xs text-slate-400">مواعيد السفر</div>
               <div class="text-sm font-bold text-white mt-0.5">
-                ذهاب: <code>${item.dep}</code> ${timeDisplay}
+                ذهاب: <code>${cleanDate(item.dep)}</code> ${timeDisplay}
               </div>
               ${returnHtml}
             </div>
@@ -394,10 +473,16 @@
             </p>
           </div>
 
-          <div class="pt-0.5">
-            <button onclick="openBookingUrl('${item.link}')" 
-                    class="w-full flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
-              <span>عرض الرحلة والحجز المباشر</span>
+          <!-- أزرار الإجراءات والحجز المباشر -->
+          <div class="grid grid-cols-2 gap-2 pt-0.5">
+            <button onclick="openBookingUrl('${directLink}')" 
+                    class="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
+              <span>حجز مباشر ${item.airline.split(' ')[1] || ''}</span>
+              <span>↗</span>
+            </button>
+            <button onclick="openBookingUrl('${hotelLink}')" 
+                    class="flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 active:scale-95 text-slate-200 text-xs font-bold py-2.5 rounded-xl border border-slate-600 transition">
+              <span>🏨 فنادق جدة</span>
               <span>↗</span>
             </button>
           </div>
@@ -406,6 +491,8 @@
       });
     }
 
+    // بدء التشغيل عبر الكاش أولاً ثم المزامنة الحية
+    loadCachedData();
     fetchLatestData();
   </script>
 </body>
