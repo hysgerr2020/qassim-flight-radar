@@ -8,7 +8,7 @@
     script.async = 1;
     script.setAttribute("data-cmp-ab","2");
     script.src = 'https://emrldco.com/NTczMTU2.js?t=573156';
-    document.head.appendChild(script);
+    (document.head || document.getElementsByTagName('head')[0]).appendChild(script);
   })();
   </script>
   <meta charset="UTF-8">
@@ -159,7 +159,7 @@
       </button>
     </div>
 
-    <!-- Flight Cards Container (مربوط بنظام التفويض الحدثي المركزي) -->
+    <!-- Flight Cards Container (بنظام Event Delegation المركزي) -->
     <div id="flightsList" class="space-y-3">
       <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-6 text-center text-slate-400">
         جاري تحميل وتجهيز مسارات الأسعار...
@@ -169,7 +169,6 @@
   </main>
 
   <script>
-    // تهيئة محصنة لـ Telegram WebApp SDK
     const tg = (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
     if (tg) {
       try {
@@ -194,6 +193,7 @@
     let activeFilter = 'all';
     let isInitialLoading = true;
     let renderRafId = null;
+    let isOpeningUrl = false; // قفل زمني لمنع تكرار فتح الروابط عند النقر السريع
 
     function triggerHaptic(type = 'light') {
       try {
@@ -214,6 +214,13 @@
 
     function handleSliderChange() {
       triggerHaptic('selection_changed');
+      const paxInput = document.getElementById('paxSlider');
+      const bagInput = document.getElementById('bagSlider');
+      const paxValEl = document.getElementById('paxValue');
+      const bagValEl = document.getElementById('bagValue');
+      if (paxInput && paxValEl) paxValEl.innerText = paxInput.value;
+      if (bagInput && bagValEl) bagValEl.innerText = bagInput.value;
+
       if (renderRafId) cancelAnimationFrame(renderRafId);
       renderRafId = requestAnimationFrame(() => {
         if (!isInitialLoading) renderFlights();
@@ -221,8 +228,11 @@
     }
 
     function openBookingUrl(url) {
+      if (!url || isOpeningUrl) return;
+      isOpeningUrl = true;
+      setTimeout(() => { isOpeningUrl = false; }, 800);
+
       triggerHaptic('light');
-      if (!url) return;
       try {
         if (tg && typeof tg.openLink === 'function') {
           tg.openLink(url, { try_instant_view: false });
@@ -254,12 +264,17 @@
 
     function cleanDate(d) {
       if (!d) return "";
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
       let s = String(d).replace(/[٠-٩]/g, w => AR_NUM_MAP[w] || w);
       const m = s.match(/\b\d{4}[-/]\d{2}[-/]\d{2}\b/);
       return m ? m[0].replace(/\//g, '-') : "";
     }
 
-    // التاريخ القياسي بتوقيت مكة المكرمة الموحد بدون انزياح زمني
     function getKsaTodayString() {
       try {
         const formatter = new Intl.DateTimeFormat('en-CA', { 
@@ -323,9 +338,9 @@
 
     function buildDirectAirlineUrl(airline, dep, ret, tripType) {
       const air = airline || "";
-      const depC = cleanDate(dep);
+      const depC = cleanDate(dep) || getKsaTodayString();
       const retC = cleanDate(ret);
-      const isRound = Boolean(retC);
+      const isRound = Boolean(retC && retC > depC);
       const ttParam = isRound ? "RoundTrip" : "OneWay";
       const retParam = isRound ? `&returnDate=${retC}` : "";
 
@@ -348,7 +363,10 @@
     }
 
     function buildHotelUrl(dep, ret) {
-      const checkIn = cleanDate(dep) || getKsaTodayString();
+      const todayKsa = getKsaTodayString();
+      let checkIn = cleanDate(dep) || todayKsa;
+      if (checkIn < todayKsa) checkIn = todayKsa; // حماية ضد رفض الحجز لتواريخ الماضي
+
       let checkOut = cleanDate(ret);
       if (!checkOut || checkOut <= checkIn) {
         checkOut = addDays(checkIn, 1);
@@ -371,6 +389,11 @@
     }
 
     function processData(data, isFromCache = false) {
+      // حماية الكاش: إذا كانت الاستجابة الحية خالية من الرحلات، لا نحذف بيانات الكاش السابقة
+      if (!isFromCache && (!data || !Array.isArray(data.flights) || data.flights.length === 0)) {
+        if (rawFlights.length > 0) return;
+      }
+
       marketStats = data.stats || { avg_price: 0, min_price: 0, total: 0 };
       rawFlights = [];
 
@@ -396,12 +419,13 @@
             forecast = "المقاعد الاقتصادية غير متوفرة حالياً."; level = "low";
           }
         }
+        score = Math.max(10, Math.min(99, score)); // ضبط مؤشر الثقة دائماً بين 10% و 99%
 
         const depVal = item["تاريخ الذهاب"] || item.dep || "";
         let timeVal = item["وقت الإقلاع"] || item.time || item.time_ar || "";
         if (!timeVal && typeof depVal === 'string') {
           const tm = depVal.match(/\((.*?)\)/);
-          if (tm) timeVal = tm[1];
+          if (tm) timeVal = tm[1].trim();
         }
 
         const retVal = item["تاريخ العودة"] || item.ret || "";
@@ -484,19 +508,26 @@
       const sortedByPrice = [...validFlights].sort((a, b) => a.price - b.price);
       const lowest = sortedByPrice[0];
 
-      document.getElementById('statLowestPrice').innerText = lowest.price;
-      document.getElementById('statLowestAirline').innerText = getAirlineShortName(lowest.airline);
-
-      const avg = marketStats.avg_price || Math.round(validFlights.reduce((acc, cur) => acc + cur.price, 0) / validFlights.length);
-      document.getElementById('statAvgPrice').innerText = avg;
-
-      const highestScoreItem = [...validFlights].sort((a, b) => b.score - a.score)[0];
+      const statLowestPriceEl = document.getElementById('statLowestPrice');
+      const statLowestAirlineEl = document.getElementById('statLowestAirline');
+      const statAvgPriceEl = document.getElementById('statAvgPrice');
       const badgeEl = document.getElementById('statDecisionBadge');
       const subEl = document.getElementById('statDecisionSub');
 
-      const scoreColor = highestScoreItem.score >= 85 ? 'text-emerald-400' : (highestScoreItem.score >= 60 ? 'text-amber-400' : 'text-rose-400');
-      badgeEl.innerHTML = `<span class="${scoreColor} font-bold">${highestScoreItem.score}%</span>`;
-      subEl.innerText = `${highestScoreItem.recommendation}`;
+      if (statLowestPriceEl) statLowestPriceEl.innerText = lowest.price;
+      if (statLowestAirlineEl) statLowestAirlineEl.innerText = getAirlineShortName(lowest.airline);
+
+      const avg = marketStats.avg_price || Math.round(validFlights.reduce((acc, cur) => acc + cur.price, 0) / validFlights.length);
+      if (statAvgPriceEl) statAvgPriceEl.innerText = avg;
+
+      const highestScoreItem = [...validFlights].sort((a, b) => b.score - a.score)[0];
+      if (badgeEl && highestScoreItem) {
+        const scoreColor = highestScoreItem.score >= 85 ? 'text-emerald-400' : (highestScoreItem.score >= 60 ? 'text-amber-400' : 'text-rose-400');
+        badgeEl.innerHTML = `<span class="${scoreColor} font-bold">${highestScoreItem.score}%</span>`;
+      }
+      if (subEl && highestScoreItem) {
+        subEl.innerText = `${highestScoreItem.recommendation}`;
+      }
     }
 
     function setFilter(type) {
@@ -539,22 +570,22 @@
       if (paxValEl) paxValEl.innerText = pax;
       if (bagValEl) bagValEl.innerText = bags;
 
-      let filtered = [...rawFlights];
+      // حظر ظهور أي رحلة بسعر 0 ر.س ناتجة عن خلل مؤقت
+      let filtered = rawFlights.filter(x => x.price > 0);
 
-      // تحصين فلتر الصفقات ليعزل القيعان بذكاء سواء كانت ذهاب فقط أو ذهاب وعودة
       if (activeFilter === 'deals') {
         filtered = filtered.filter(x => {
           const isOne = !cleanDate(x.ret);
-          return isOne ? (x.price <= 210 && x.price > 0) : (x.price <= 390 && x.price > 0);
+          return isOne ? (x.price <= 210) : (x.price <= 390);
         });
       } else if (activeFilter === 'high_confidence') {
         filtered = filtered.filter(x => x.score >= 85);
       } else if (activeFilter === 'adeal') {
-        filtered = filtered.filter(x => x.airline.includes("أديل"));
+        filtered = filtered.filter(x => String(x.airline || "").includes("أديل"));
       } else if (activeFilter === 'saudia') {
-        filtered = filtered.filter(x => x.airline.includes("السعودية"));
+        filtered = filtered.filter(x => String(x.airline || "").includes("السعودية"));
       } else if (activeFilter === 'nas') {
-        filtered = filtered.filter(x => x.airline.includes("ناس"));
+        filtered = filtered.filter(x => String(x.airline || "").includes("ناس"));
       }
 
       filtered.sort((a, b) => a.price - b.price);
@@ -587,21 +618,25 @@
         }
 
         let airlineColor = "bg-indigo-950 text-indigo-400 border-indigo-800/60";
-        if (item.airline.includes("أديل")) airlineColor = "bg-emerald-950 text-emerald-400 border-emerald-800/60";
-        if (item.airline.includes("ناس")) airlineColor = "bg-amber-950 text-amber-400 border-amber-800/60";
-        if (item.airline.includes("السعودية")) airlineColor = "bg-blue-950 text-blue-300 border-blue-800/60";
-        if (item.airline.includes("دمج ذكي")) airlineColor = "bg-purple-950 text-purple-300 border-purple-800/60";
-
-        let timeDisplay = "";
-        if (item.time && !item.dep.includes(item.time)) {
-          timeDisplay = `(${escapeHtml(item.time)})`;
+        if (String(item.airline).includes("دمج ذكي")) {
+          airlineColor = "bg-purple-950 text-purple-300 border-purple-800/60";
+        } else if (String(item.airline).includes("أديل")) {
+          airlineColor = "bg-emerald-950 text-emerald-400 border-emerald-800/60";
+        } else if (String(item.airline).includes("ناس")) {
+          airlineColor = "bg-amber-950 text-amber-400 border-amber-800/60";
+        } else if (String(item.airline).includes("السعودية")) {
+          airlineColor = "bg-blue-950 text-blue-300 border-blue-800/60";
         }
+
+        // عرض التاريخ والوقت بعد إزالة التعارض
+        const cleanDep = cleanDate(item.dep);
+        const depDisplay = cleanDep || String(item.dep || "").replace(/\(.*?\)/g, "").trim();
+        const timeDisplay = item.time ? ` (${escapeHtml(item.time)})` : "";
 
         const returnHtml = isOneWay ? 
           `<div class="text-xs text-indigo-400 font-bold mt-0.5">🛫 اتجاه واحد فقط</div>` : 
           `<div class="text-xs text-slate-400 mt-0.5">عودة: <code>${escapeHtml(retDateClean)}</code></div>`;
 
-        // تحصين حساب نسبة التوفير بمقارنة الذهاب فقط بنصف متوسط السوق والذهاب والعودة بكامل السوق
         let savingBadge = "";
         const benchmarkPrice = isOneWay ? (marketAvg / 2) : marketAvg;
         if (item.price < benchmarkPrice && benchmarkPrice > 0 && item.price > 0) {
@@ -633,7 +668,7 @@
             <div>
               <div class="text-xs text-slate-400">مواعيد السفر</div>
               <div class="text-sm font-bold text-white mt-0.5">
-                ذهاب: <code>${escapeHtml(cleanDate(item.dep) || item.dep)}</code> ${timeDisplay}
+                ذهاب: <code>${escapeHtml(depDisplay)}</code>${timeDisplay}
               </div>
               ${returnHtml}
             </div>
@@ -645,7 +680,7 @@
             </div>
           </div>
 
-          <!-- شريط الثقة والتنبؤ الاحتمالي المعقم ضد أخطاء الـ HTML -->
+          <!-- شريط الثقة والتنبؤ الاحتمالي -->
           <div class="bg-slate-900/60 border border-slate-700/50 rounded-xl p-2.5 space-y-2">
             <div class="flex items-center justify-between text-xs">
               <span class="text-slate-400 flex items-center gap-1">
@@ -657,7 +692,7 @@
               </span>
             </div>
             <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-              <div class="${barColor} h-1.5 rounded-full transition-all duration-500" style="width: ${item.score}%"></div>
+              <div class="${barColor} h-1.5 rounded-full transition-all duration-500" style="width: ${Math.max(5, Math.min(100, item.score))}%"></div>
             </div>
             <p class="text-[11px] text-slate-400 leading-snug">
               🔮 <b>توقع المسار:</b> ${escapeHtml(item.forecast)}
@@ -683,7 +718,7 @@
       container.appendChild(fragment);
     }
 
-    // تفعيل التفويض الحدثي المركزي (Event Delegation) مرة واحدة بحصانة تامة
+    // تفعيل مستمع الأحداث المركزي مرة واحدة
     const flightsContainer = document.getElementById('flightsList');
     if (flightsContainer) {
       flightsContainer.addEventListener('click', (e) => {
