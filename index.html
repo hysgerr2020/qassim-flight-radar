@@ -164,7 +164,7 @@
       </button>
     </div>
 
-    <!-- Flight Cards Container (بنظام Event Delegation المركزي) -->
+    <!-- Flight Cards Container -->
     <div id="flightsList" class="space-y-3">
       <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-6 text-center text-slate-400">
         جاري تحميل وتجهيز مسارات الأسعار...
@@ -174,7 +174,7 @@
   </main>
 
   <script>
-    // تفعيل أحداث اللمس على iOS فورياً
+    // تفعيل ردود الفعل اللمسية على متصفحات Safari و iOS
     document.addEventListener('touchstart', function() {}, { passive: true });
 
     // تهيئة محصنة لـ Telegram WebApp SDK
@@ -294,7 +294,6 @@
       return isNaN(n) ? 0 : Math.round(n);
     }
 
-    // استخراج التاريخ بدعم الخانات الفردية والزوجية وصيغ YYYY-M-D
     function cleanDate(d) {
       if (!d) return "";
       if (d instanceof Date && !isNaN(d.getTime())) {
@@ -375,13 +374,15 @@
       return Math.round(140 * factor * bags);
     }
 
-    function buildDirectAirlineUrl(airline, dep, ret, tripType) {
+    // بناء روابط الحجز بدعم عدد الركاب المحدد ديناميكياً
+    function buildDirectAirlineUrl(airline, dep, ret, tripType, paxCount = 1) {
       const normAir = normalizeArabic(airline);
       const depC = cleanDate(dep) || getKsaTodayString();
       const retC = cleanDate(ret);
       const isRound = Boolean(retC && retC >= depC);
       const ttParam = isRound ? "RoundTrip" : "OneWay";
       const retParam = isRound ? `&returnDate=${retC}` : "";
+      const adults = Math.max(1, parseInt(paxCount, 10) || 1);
 
       const normType = normalizeArabic(tripType);
       const isOneWayIn = normType.includes("جده ⬅ القصيم") || normType.includes("عوده فقط") || normType.includes("oneway_in");
@@ -393,11 +394,11 @@
       }
 
       if (normAir.includes("اديل") || normAir.includes("flyadeal")) {
-        return `https://www.flyadeal.com/ar/search-flight?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=1&tripType=${ttParam}`;
+        return `https://www.flyadeal.com/ar/search-flight?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
       } else if (normAir.includes("ناس") || normAir.includes("flynas")) {
-        return `https://www.flynas.com/ar/booking/flight-search?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=1&tripType=${ttParam}`;
+        return `https://www.flynas.com/ar/booking/flight-search?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
       } else if (normAir.includes("السعوديه") || normAir.includes("saudia")) {
-        return `https://www.saudia.com/ar/booking?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=1&tripType=${ttParam}`;
+        return `https://www.saudia.com/ar/booking?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
       }
       return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}${isRound ? '%20through%20' + retC : ''}%20nonstop&curr=SAR&hl=ar&gl=sa`;
     }
@@ -512,7 +513,6 @@
           ret: retVal,
           airline: airlineVal,
           price: price,
-          link: item["الرابط"] || item.link || buildDirectAirlineUrl(airlineVal, depVal, retVal, tripTypeVal),
           score: score,
           recommendation: rec,
           forecast: forecast,
@@ -537,7 +537,6 @@
       renderFlights();
     }
 
-    // معالجة شبكية محصنة ضد تسابق الطلبات
     async function fetchLatestData(forceRefresh = false) {
       if (activeFetchController) {
         activeFetchController.abort();
@@ -557,7 +556,7 @@
         processData(data, false);
       } catch (err) {
         clearTimeout(timeoutId);
-        if (err.name === 'AbortError') return; // تم إلغاء الطلب لصالح طلب أحدث
+        if (err.name === 'AbortError') return;
         console.error("خطأ في جلب البيانات:", err);
         const updateLabel = document.getElementById('lastUpdateText');
         if (updateLabel) {
@@ -609,7 +608,6 @@
       }
     }
 
-    // دالة الرجوع كمرجع ثابت لمنع تسريب الذاكرة
     function handleBackButton() {
       setFilter('all');
     }
@@ -618,7 +616,6 @@
       triggerHaptic('selection_changed');
       activeFilter = type;
 
-      // إدارة نظيفة لزر الرجوع دون تراكم المستمعين
       if (tg && tg.BackButton) {
         try {
           tg.BackButton.offClick(handleBackButton);
@@ -639,6 +636,9 @@
       if (activeBtn) {
         activeBtn.classList.add('bg-indigo-600', 'text-white', 'border-indigo-500');
         activeBtn.classList.remove('bg-slate-800', 'text-slate-300', 'border-slate-700');
+        try {
+          activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        } catch (e) {}
       }
       if (!isInitialLoading) {
         renderFlights();
@@ -750,7 +750,8 @@
           }
         }
 
-        const directLink = buildDirectAirlineUrl(item.airline, item.dep, item.ret, item.trip_type);
+        // بناء الرابط المباشر متضمناً عدد الركاب المختارين ديناميكياً
+        const directLink = buildDirectAirlineUrl(item.airline, item.dep, item.ret, item.trip_type, pax);
         const hotelInfo = buildHotelInfo(item.dep, item.ret, item.trip_type);
         const shortName = getAirlineShortName(item.airline);
 
@@ -823,7 +824,7 @@
       container.appendChild(fragment);
     }
 
-    // تفعيل مستمع الأحداث المركزي مرة واحدة بحصانة تامة
+    // تفعيل مستمع الأحداث المركزي مرة واحدة
     const flightsContainer = document.getElementById('flightsList');
     if (flightsContainer) {
       flightsContainer.addEventListener('click', (e) => {
@@ -835,7 +836,7 @@
       });
     }
 
-    // بدء التشغيل: تحميل التفضيلات، استعراض الكاش فوراً، ثم المزامنة الحية في الخلفية
+    // بدء التشغيل: استرجاع التفضيلات، استعراض الكاش فوراً، ثم المزامنة الحية في الخلفية
     loadUserPreferences();
     loadCachedData();
     fetchLatestData();
