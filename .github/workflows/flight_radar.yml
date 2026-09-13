@@ -19,7 +19,6 @@ on:
         required: false
         default: 'roundtrip'
 
-# قفل التزامن لمنع تصادم الفحص التلقائي مع طلبات التيليجرام الفورية
 concurrency:
   group: flight-radar-engine
   cancel-in-progress: false
@@ -57,7 +56,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install playwright pandas openpyxl matplotlib
-          # تثبيت المتصفح السحابي ومكتبات النظام مع تفادي التنزيل المكرر
           playwright install --with-deps chromium
 
       - name: تشغيل الرادار السحابي وصائد القيعان
@@ -78,37 +76,32 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # إضافة الملفات المحدثة فقط في حال وجودها
-          for file in flight_price_history.json google_flights_weekends.xlsx flights_data.json; do
-            if [ -f "$file" ]; then
-              git add "$file"
-            fi
-          done
+          # ضم كافة الملفات المعدلة والجديدة دون استثناء لمنع خطأ unstaged changes نهائياً
+          git add -A
 
-          # التحقق من وجود تغييرات حقيقية قبل إنشاء الـ Commit
-          if git diff --staged --quiet; then
+          # التحقق من وجود تغييرات حقيقية
+          if git diff --cached --quiet; then
             echo "لا توجد تعديلات جديدة لحفظها."
           else
             git commit -m "تحديث تلقائي: بيانات الرادار والتطبيق المصغر [skip ci]"
             
-            # حلقة إعادة محاولة محصنة تعتمد أحدث البيانات المحلية (-X theirs)
+            # محاولة الدفع المباشر، وفي حال وجود تعارض تتم المزامنة النظيفة
             PUSH_SUCCESS=0
             for i in {1..5}; do
-              git fetch origin main
-              if git rebase -X theirs origin/main; then
-                if git push origin main; then
-                  echo "✅ تم دفع التعديلات بنجاح إلى المستودع."
-                  PUSH_SUCCESS=1
-                  break
-                fi
+              if git push origin main; then
+                echo "✅ تم دفع البيانات وتحديث التطبيق المصغر بنجاح!"
+                PUSH_SUCCESS=1
+                break
               fi
-              echo "⚠️ محاولة دفع غير مكتملة ($i)، إعادة المزامنة..."
-              git rebase --abort 2>/dev/null || true
-              sleep $((i * 2))
+              echo "⚠️ تعارض أثناء الدفع ($i)، جاري المزامنة مع السيرفر..."
+              git pull --rebase -X theirs origin main || {
+                git rebase --abort 2>/dev/null || true
+              }
+              sleep 2
             done
-            
+
             if [ $PUSH_SUCCESS -eq 0 ]; then
-              echo "❌ تعذر إتمام الدفع بعد 5 محاولات متتالية."
+              echo "❌ فشل الدفع النهائي بعد 5 محاولات."
               exit 1
             fi
           fi
