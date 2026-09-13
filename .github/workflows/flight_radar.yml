@@ -44,10 +44,20 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: فحص ذاكرة التخزين المؤقت لمتصفح Playwright
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('**/flight_scanner_cloud.py') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-chromium-
+
       - name: تثبيت المكتبات والمتصفح السحابي
         run: |
           python -m pip install --upgrade pip
           pip install playwright pandas openpyxl matplotlib
+          # تثبيت المتصفح السحابي ومكتبات النظام مع تفادي التنزيل المكرر
           playwright install --with-deps chromium
 
       - name: تشغيل الرادار السحابي وصائد القيعان
@@ -66,7 +76,7 @@ jobs:
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
           # إضافة الملفات المحدثة فقط في حال وجودها
           for file in flight_price_history.json google_flights_weekends.xlsx flights_data.json; do
@@ -75,18 +85,30 @@ jobs:
             fi
           done
 
-          # التحقق من وجود تغييرات حقيقية قبل عمل الـ Commit
+          # التحقق من وجود تغييرات حقيقية قبل إنشاء الـ Commit
           if git diff --staged --quiet; then
             echo "لا توجد تعديلات جديدة لحفظها."
           else
             git commit -m "تحديث تلقائي: بيانات الرادار والتطبيق المصغر [skip ci]"
             
-            # حماية متقدمة ضد تعارض التزامن مع إعادة المحاولة
-            for i in {1..3}; do
-              git pull --rebase -X ours origin main && git push && break || {
-                echo "محاولة دفع فاشلة ($i)، إعادة المزامنة..."
-                git rebase --abort 2>/dev/null || true
-                sleep 2
-              }
+            # حلقة إعادة محاولة محصنة تعتمد أحدث البيانات المحلية (-X theirs)
+            PUSH_SUCCESS=0
+            for i in {1..5}; do
+              git fetch origin main
+              if git rebase -X theirs origin/main; then
+                if git push origin main; then
+                  echo "✅ تم دفع التعديلات بنجاح إلى المستودع."
+                  PUSH_SUCCESS=1
+                  break
+                fi
+              fi
+              echo "⚠️ محاولة دفع غير مكتملة ($i)، إعادة المزامنة..."
+              git rebase --abort 2>/dev/null || true
+              sleep $((i * 2))
             done
+            
+            if [ $PUSH_SUCCESS -eq 0 ]; then
+              echo "❌ تعذر إتمام الدفع بعد 5 محاولات متتالية."
+              exit 1
+            fi
           fi
