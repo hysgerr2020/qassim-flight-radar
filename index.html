@@ -40,6 +40,11 @@
     body { font-family: 'Tajawal', sans-serif; -webkit-tap-highlight-color: transparent; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    @keyframes spin-fast {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .animate-spin-custom { animation: spin-fast 0.75s linear infinite; }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen pb-12 select-none">
@@ -56,8 +61,8 @@
           <p id="lastUpdateText" class="text-xs text-slate-400">جاري الاتصال بالسحابة...</p>
         </div>
       </div>
-      <button onclick="triggerRefresh()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95" title="تحديث البيانات">
-        🔄
+      <button id="refreshBtn" onclick="triggerRefresh()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition active:scale-95" title="تحديث البيانات">
+        <span id="refreshIcon" class="inline-block">🔄</span>
       </button>
     </div>
   </header>
@@ -160,13 +165,22 @@
   </main>
 
   <script>
-    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    // تهيئة محصنة لبيئة Telegram WebApp SDK دون رمي أخطاء في الإصدارات القديمة
+    const tg = (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
     if (tg) {
-      tg.ready();
-      tg.expand();
-      if (tg.setHeaderColor) tg.setHeaderColor('#0f172a');
-      if (tg.setBackgroundColor) tg.setBackgroundColor('#0f172a');
-      if (tg.enableClosingConfirmation) tg.enableClosingConfirmation();
+      try {
+        tg.ready();
+        tg.expand();
+        if (typeof tg.isVersionAtLeast === 'function' && tg.isVersionAtLeast('6.1')) {
+          if (tg.setHeaderColor) tg.setHeaderColor('#0f172a');
+          if (tg.setBackgroundColor) tg.setBackgroundColor('#0f172a');
+        }
+        if (typeof tg.enableClosingConfirmation === 'function') {
+          tg.enableClosingConfirmation();
+        }
+      } catch (e) {
+        console.warn("Telegram WebApp initialization notice:", e);
+      }
     }
 
     const TRAVELPAYOUTS_MARKER = "573156";
@@ -174,31 +188,64 @@
     let rawFlights = [];
     let marketStats = { avg_price: 0, min_price: 0, total: 0 };
     let activeFilter = 'all';
+    let isInitialLoading = true;
 
     function triggerHaptic(type = 'light') {
-      if (tg && tg.HapticFeedback) {
-        tg.HapticFeedback.impactOccurred(type);
-      }
+      try {
+        if (tg && tg.HapticFeedback && typeof tg.HapticFeedback.impactOccurred === 'function') {
+          tg.HapticFeedback.impactOccurred(type);
+        }
+      } catch (e) {}
     }
 
     function triggerRefresh() {
       triggerHaptic('medium');
-      fetchLatestData(true);
+      const icon = document.getElementById('refreshIcon');
+      if (icon) icon.classList.add('animate-spin-custom');
+      fetchLatestData(true).finally(() => {
+        if (icon) icon.classList.remove('animate-spin-custom');
+      });
     }
 
     function handleSliderChange() {
       triggerHaptic('selection_changed');
-      renderFlights();
+      if (!isInitialLoading) {
+        renderFlights();
+      }
     }
 
     function openBookingUrl(url) {
       triggerHaptic('light');
       if (!url) return;
-      if (tg && tg.openLink) {
-        tg.openLink(url, { try_instant_view: false });
-      } else {
+      try {
+        if (tg && typeof tg.openLink === 'function') {
+          tg.openLink(url, { try_instant_view: false });
+        } else {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }
+      } catch (e) {
         window.open(url, '_blank', 'noopener,noreferrer');
       }
+    }
+
+    // دالة تعقيم لمنع ثغرات XSS وحماية المتصفح من ابتلاع النصوص التي تحتوي على "<"
+    function escapeHtml(text) {
+      if (text === null || text === undefined) return "";
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    // استخراج السعر الرقمي بأعلى درجات المناعة ضد الفواصل والأرقام المشرقية
+    function parsePrice(val) {
+      if (typeof val === 'number') return isNaN(val) ? 0 : Math.round(val);
+      if (!val) return 0;
+      let s = String(val).replace(/[٠-٩]/g, w => AR_NUM_MAP[w] || w).replace(/,/g, '').trim();
+      let n = parseFloat(s);
+      return isNaN(n) ? 0 : Math.round(n);
     }
 
     function cleanDate(d) {
@@ -208,18 +255,29 @@
       return m ? m[0].replace(/\//g, '-') : "";
     }
 
+    // حساب التاريخ القياسي بتوقيت مكة المكرمة (UTC+3) لحماية حجز الفنادق بعد منتصف الليل
+    function getKsaTodayString() {
+      const now = new Date();
+      const ksaTime = new Date(now.getTime() + (3 * 3600000 + now.getTimezoneOffset() * 60000));
+      const y = ksaTime.getFullYear();
+      const m = String(ksaTime.getMonth() + 1).padStart(2, '0');
+      const d = String(ksaTime.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
     function addDays(dateStr, days) {
       try {
-        const d = new Date(dateStr + "T00:00:00");
-        if (isNaN(d.getTime())) return dateStr;
-        d.setDate(d.getDate() + days);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-      } catch (e) {
-        return dateStr;
-      }
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+          const d = new Date(Date.UTC(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)));
+          d.setUTCDate(d.getUTCDate() + days);
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(d.getUTCDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        }
+      } catch (e) {}
+      return dateStr;
     }
 
     function getAirlineShortName(airline) {
@@ -282,16 +340,16 @@
     }
 
     function buildHotelUrl(dep, ret) {
-      const checkIn = cleanDate(dep) || new Date().toISOString().slice(0, 10);
+      const checkIn = cleanDate(dep) || getKsaTodayString();
       let checkOut = cleanDate(ret);
-      // حماية ضد خطأ 0 ليالٍ: في حال عدم وجود عودة، يتم احتساب ليلة واحدة تلقائياً
+      // تحصين حجز الفنادق ضد خطأ 0 ليالٍ
       if (!checkOut || checkOut <= checkIn) {
         checkOut = addDays(checkIn, 1);
       }
       return `https://search.hotellook.com/?destination=Jeddah&checkIn=${checkIn}&checkOut=${checkOut}&marker=${TRAVELPAYOUTS_MARKER}&language=ar&currency=SAR`;
     }
 
-    // استعراض الكاش المحلي الفوري لتشغيل التطبيق في أجزاء من الثانية
+    // استعراض الكاش المحلي الفوري لتشغيل التطبيق في أقل من 0.2 ثانية
     function loadCachedData() {
       try {
         const cached = localStorage.getItem('qassim_radar_cache');
@@ -311,13 +369,13 @@
       rawFlights = [];
 
       rawFlights = (data.flights || []).map(item => {
-        const price = Number(item["السعر"] || item.price || 0);
-        let score = item["مؤشر_الثقة"] || item.score || 50;
+        const price = parsePrice(item["السعر"] || item.price);
+        let score = parsePrice(item["مؤشر_الثقة"] || item.score);
         let rec = item["توصية_القرار"] || item.recommendation || "راقب السعر";
         let forecast = item["توقعات_7_أيام"] || item.forecast || "السعر ضمن النطاق الطبيعي.";
         let level = item["مستوى_الثقة"] || item.level || "medium";
 
-        if (!item["مؤشر_الثقة"] && !item.score) {
+        if (!score || score <= 0) {
           if (price <= 358) {
             score = 96; rec = "احجز فوراً (قاع تاريخي)";
             forecast = "السعر في القاع الترويجي الأدنى."; level = "high";
@@ -364,6 +422,7 @@
         } catch(e) {}
       }
 
+      isInitialLoading = false;
       updateStats();
       renderFlights();
     }
@@ -379,9 +438,19 @@
         const updateLabel = document.getElementById('lastUpdateText');
         if (rawFlights.length === 0) {
           updateLabel.innerText = "⚠️ تعذر قراءة البيانات السحابية";
+          const container = document.getElementById('flightsList');
+          if (container) {
+            container.innerHTML = `
+              <div class="bg-slate-800/40 border border-rose-900/40 rounded-2xl p-6 text-center text-slate-400 space-y-2">
+                <div class="text-rose-400 font-bold">⚠️ تعذر مزامنة الرحلات الحية</div>
+                <div class="text-xs">تأكد من اتصالك بالإنترنت أو أعد المحاولة لاحقاً.</div>
+              </div>`;
+          }
         } else {
           updateLabel.innerText += " (وضع عدم الاتصال ⚠️)";
         }
+      } finally {
+        isInitialLoading = false;
       }
     }
 
@@ -417,12 +486,23 @@
         activeBtn.classList.add('bg-indigo-600', 'text-white', 'border-indigo-500');
         activeBtn.classList.remove('bg-slate-800', 'text-slate-300', 'border-slate-700');
       }
-      renderFlights();
+      if (!isInitialLoading) {
+        renderFlights();
+      }
     }
 
     function renderFlights() {
       const container = document.getElementById('flightsList');
+      if (!container) return;
       container.innerHTML = "";
+
+      if (isInitialLoading && rawFlights.length === 0) {
+        container.innerHTML = `
+          <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-6 text-center text-slate-400">
+            جاري تحميل وتجهيز مسارات الأسعار...
+          </div>`;
+        return;
+      }
 
       const pax = parseInt(document.getElementById('paxSlider').value, 10) || 1;
       const bags = parseInt(document.getElementById('bagSlider').value, 10) || 0;
@@ -479,12 +559,12 @@
 
         let timeDisplay = "";
         if (item.time && !item.dep.includes(item.time)) {
-          timeDisplay = `(${item.time})`;
+          timeDisplay = `(${escapeHtml(item.time)})`;
         }
 
         const returnHtml = isOneWay ? 
           `<div class="text-xs text-indigo-400 font-bold mt-0.5">🛫 اتجاه واحد فقط</div>` : 
-          `<div class="text-xs text-slate-400 mt-0.5">عودة: <code>${cleanDate(item.ret)}</code></div>`;
+          `<div class="text-xs text-slate-400 mt-0.5">عودة: <code>${escapeHtml(cleanDate(item.ret))}</code></div>`;
 
         let savingBadge = "";
         if (item.price < marketAvg && marketAvg > 0) {
@@ -505,18 +585,18 @@
           <div class="flex items-center justify-between border-b border-slate-700/50 pb-2.5">
             <div class="flex items-center gap-1.5">
               <span class="px-2.5 py-0.5 rounded-lg text-xs font-bold border ${airlineColor}">
-                ✈️ ${item.airline}
+                ✈️ ${escapeHtml(item.airline)}
               </span>
               ${savingBadge}
             </div>
-            <span class="text-xs text-slate-400 font-medium">${item.trip_type}</span>
+            <span class="text-xs text-slate-400 font-medium">${escapeHtml(item.trip_type)}</span>
           </div>
 
           <div class="flex items-center justify-between">
             <div>
               <div class="text-xs text-slate-400">مواعيد السفر</div>
               <div class="text-sm font-bold text-white mt-0.5">
-                ذهاب: <code>${cleanDate(item.dep)}</code> ${timeDisplay}
+                ذهاب: <code>${escapeHtml(cleanDate(item.dep))}</code> ${timeDisplay}
               </div>
               ${returnHtml}
             </div>
@@ -528,7 +608,7 @@
             </div>
           </div>
 
-          <!-- شريط الثقة والتنبؤ الاحتمالي -->
+          <!-- شريط الثقة والتنبؤ الاحتمالي المعقم ضد أخطاء الـ HTML -->
           <div class="bg-slate-900/60 border border-slate-700/50 rounded-xl p-2.5 space-y-2">
             <div class="flex items-center justify-between text-xs">
               <span class="text-slate-400 flex items-center gap-1">
@@ -536,31 +616,41 @@
                 <b class="text-white">${item.score}%</b>
               </span>
               <span class="px-2 py-0.5 rounded-md text-[11px] font-bold border ${badgeBg}">
-                ${item.recommendation}
+                ${escapeHtml(item.recommendation)}
               </span>
             </div>
             <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
               <div class="${barColor} h-1.5 rounded-full transition-all duration-500" style="width: ${item.score}%"></div>
             </div>
             <p class="text-[11px] text-slate-400 leading-snug">
-              🔮 <b>توقع المسار:</b> ${item.forecast}
+              🔮 <b>توقع المسار:</b> ${escapeHtml(item.forecast)}
             </p>
           </div>
 
-          <!-- أزرار الإجراءات والحجز المباشر المحصنة -->
+          <!-- أزرار الإجراءات التفاعلية المرتبطة برمجياً دون تداخل نصوص -->
           <div class="grid grid-cols-2 gap-2 pt-0.5">
-            <button onclick="openBookingUrl('${encodeURI(directLink)}')" 
-                    class="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
-              <span>حجز مباشر (${shortName})</span>
+            <button class="btn-direct-booking flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
+              <span>حجز مباشر (${escapeHtml(shortName)})</span>
               <span>↗</span>
             </button>
-            <button onclick="openBookingUrl('${encodeURI(hotelLink)}')" 
-                    class="flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 active:scale-95 text-slate-200 text-xs font-bold py-2.5 rounded-xl border border-slate-600 transition">
+            <button class="btn-hotel-booking flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 active:scale-95 text-slate-200 text-xs font-bold py-2.5 rounded-xl border border-slate-600 transition">
               <span>🏨 فنادق جدة</span>
               <span>↗</span>
             </button>
           </div>
         `;
+
+        // ربط الأحداث برمجياً لحصانة تامة ضد انهيار وسوم onclick أو علامات الاقتباس
+        const directBtn = card.querySelector('.btn-direct-booking');
+        if (directBtn) {
+          directBtn.addEventListener('click', () => openBookingUrl(directLink));
+        }
+
+        const hotelBtn = card.querySelector('.btn-hotel-booking');
+        if (hotelBtn) {
+          hotelBtn.addEventListener('click', () => openBookingUrl(hotelLink));
+        }
+
         fragment.appendChild(card);
       });
 
