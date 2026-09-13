@@ -51,7 +51,7 @@
     .animate-spin-custom { animation: spin-fast 0.75s linear infinite; }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen select-none">
+<body class="bg-slate-900 text-slate-100 min-h-screen min-h-[100dvh] select-none">
 
   <!-- Header Section -->
   <header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3">
@@ -121,6 +121,7 @@
             <span id="paxValue" class="font-bold text-white">1</span>
           </div>
           <input id="paxSlider" type="range" min="1" max="6" value="1" 
+                 style="touch-action: none;"
                  class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                  oninput="handleSliderChange()">
         </div>
@@ -131,6 +132,7 @@
             <span id="bagValue" class="font-bold text-white">0</span>
           </div>
           <input id="bagSlider" type="range" min="0" max="4" value="0" 
+                 style="touch-action: none;"
                  class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                  oninput="handleSliderChange()">
         </div>
@@ -159,7 +161,7 @@
       </button>
     </div>
 
-    <!-- Flight Cards Container (بنظام Event Delegation المركزي) -->
+    <!-- Flight Cards Container -->
     <div id="flightsList" class="space-y-3">
       <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-6 text-center text-slate-400">
         جاري تحميل وتجهيز مسارات الأسعار...
@@ -182,7 +184,7 @@
           tg.enableClosingConfirmation();
         }
       } catch (e) {
-        console.warn("Telegram WebApp initialization notice:", e);
+        console.warn("Telegram WebApp notice:", e);
       }
     }
 
@@ -193,7 +195,7 @@
     let activeFilter = 'all';
     let isInitialLoading = true;
     let renderRafId = null;
-    let isOpeningUrl = false; // قفل زمني لمنع تكرار فتح الروابط عند النقر السريع
+    let isOpeningUrl = false;
 
     function triggerHaptic(type = 'light') {
       try {
@@ -340,11 +342,12 @@
       const air = airline || "";
       const depC = cleanDate(dep) || getKsaTodayString();
       const retC = cleanDate(ret);
-      const isRound = Boolean(retC && retC > depC);
+      // دعم رحلات اليوم الواحد (retC >= depC) بدلاً من إلغائها
+      const isRound = Boolean(retC && retC >= depC);
       const ttParam = isRound ? "RoundTrip" : "OneWay";
       const retParam = isRound ? `&returnDate=${retC}` : "";
 
-      const isOneWayIn = String(tripType || "").includes("جدة ⬅ القصيم") || String(tripType || "").includes("عودة فقط");
+      const isOneWayIn = String(tripType || "").includes("جدة ⬅ القصيم") || String(tripType || "").includes("عودة فقط") || String(tripType || "").includes("oneway_in");
       const origin = isOneWayIn ? "JED" : "ELQ";
       const destination = isOneWayIn ? "ELQ" : "JED";
 
@@ -365,7 +368,7 @@
     function buildHotelUrl(dep, ret) {
       const todayKsa = getKsaTodayString();
       let checkIn = cleanDate(dep) || todayKsa;
-      if (checkIn < todayKsa) checkIn = todayKsa; // حماية ضد رفض الحجز لتواريخ الماضي
+      if (checkIn < todayKsa) checkIn = todayKsa;
 
       let checkOut = cleanDate(ret);
       if (!checkOut || checkOut <= checkIn) {
@@ -389,7 +392,6 @@
     }
 
     function processData(data, isFromCache = false) {
-      // حماية الكاش: إذا كانت الاستجابة الحية خالية من الرحلات، لا نحذف بيانات الكاش السابقة
       if (!isFromCache && (!data || !Array.isArray(data.flights) || data.flights.length === 0)) {
         if (rawFlights.length > 0) return;
       }
@@ -419,7 +421,7 @@
             forecast = "المقاعد الاقتصادية غير متوفرة حالياً."; level = "low";
           }
         }
-        score = Math.max(10, Math.min(99, score)); // ضبط مؤشر الثقة دائماً بين 10% و 99%
+        score = Math.max(10, Math.min(99, score));
 
         const depVal = item["تاريخ الذهاب"] || item.dep || "";
         let timeVal = item["وقت الإقلاع"] || item.time || item.time_ar || "";
@@ -570,7 +572,6 @@
       if (paxValEl) paxValEl.innerText = pax;
       if (bagValEl) bagValEl.innerText = bags;
 
-      // حظر ظهور أي رحلة بسعر 0 ر.س ناتجة عن خلل مؤقت
       let filtered = rawFlights.filter(x => x.price > 0);
 
       if (activeFilter === 'deals') {
@@ -628,9 +629,9 @@
           airlineColor = "bg-blue-950 text-blue-300 border-blue-800/60";
         }
 
-        // عرض التاريخ والوقت بعد إزالة التعارض
         const cleanDep = cleanDate(item.dep);
         const depDisplay = cleanDep || String(item.dep || "").replace(/\(.*?\)/g, "").trim();
+        // إزالة التصريح المزدوج لـ timeDisplay لمنع الـ SyntaxError
         const timeDisplay = item.time ? ` (${escapeHtml(item.time)})` : "";
 
         const returnHtml = isOneWay ? 
@@ -646,7 +647,8 @@
           }
         }
 
-        const directLink = buildDirectAirlineUrl(item.airline, item.dep, item.ret, item.trip_type);
+        // استخدام رابط السيرفر المباشر العميق إذا وجد
+        const directLink = item.link || buildDirectAirlineUrl(item.airline, item.dep, item.ret, item.trip_type);
         const hotelLink = buildHotelUrl(item.dep, item.ret);
         const shortName = getAirlineShortName(item.airline);
 
@@ -718,7 +720,7 @@
       container.appendChild(fragment);
     }
 
-    // تفعيل مستمع الأحداث المركزي مرة واحدة
+    // تفعيل التفويض الحدثي المركزي لمرة واحدة فقط
     const flightsContainer = document.getElementById('flightsList');
     if (flightsContainer) {
       flightsContainer.addEventListener('click', (e) => {
