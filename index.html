@@ -167,17 +167,15 @@
     <!-- Flight Cards Container -->
     <div id="flightsList" class="space-y-3">
       <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-6 text-center text-slate-400">
-        جاري تحميل وتجهيز مسارات الأسعار...
+        جاري فحص وتحديث أسعار الرحلات...
       </div>
     </div>
 
   </main>
 
   <script>
-    // تفعيل ردود الفعل اللمسية على متصفحات Safari و iOS
     document.addEventListener('touchstart', function() {}, { passive: true });
 
-    // تهيئة محصنة لـ Telegram WebApp SDK
     const tg = (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
     if (tg) {
       try {
@@ -190,9 +188,7 @@
         if (typeof tg.enableClosingConfirmation === 'function') {
           tg.enableClosingConfirmation();
         }
-      } catch (e) {
-        console.warn("Telegram WebApp notice:", e);
-      }
+      } catch (e) {}
     }
 
     const TRAVELPAYOUTS_MARKER = "573156";
@@ -254,10 +250,7 @@
 
     function openBookingUrl(url) {
       if (!url || isOpeningUrl) return;
-      if (!/^https?:\/\//i.test(url)) {
-        console.warn("Blocked invalid protocol URL:", url);
-        return;
-      }
+      if (!/^https?:\/\//i.test(url)) return;
 
       isOpeningUrl = true;
       setTimeout(() => { isOpeningUrl = false; }, 800);
@@ -306,10 +299,6 @@
       const m = s.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/);
       if (m) {
         return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
-      }
-      const mRev = s.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
-      if (mRev) {
-        return `${mRev[3]}-${String(mRev[2]).padStart(2, '0')}-${String(mRev[1]).padStart(2, '0')}`;
       }
       return "";
     }
@@ -374,7 +363,7 @@
       return Math.round(140 * factor * bags);
     }
 
-    // بناء روابط الحجز بدعم عدد الركاب المحدد ديناميكياً
+    // بناء روابط حجز فورية - حل جذري لتعليق طيران أديل
     function buildDirectAirlineUrl(airline, dep, ret, tripType, paxCount = 1) {
       const normAir = normalizeArabic(airline);
       const depC = cleanDate(dep) || getKsaTodayString();
@@ -389,13 +378,14 @@
       const origin = isOneWayIn ? "JED" : "ELQ";
       const destination = isOneWayIn ? "ELQ" : "JED";
 
-      if (normAir.includes("دمج ذكي")) {
-        return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}${isRound ? '%20through%20' + retC : ''}%20nonstop&curr=SAR&hl=ar&gl=sa`;
+      // حل جذري: توجيه طيران أديل والدمج الذكي عبر محرك الفحص السريع المباشر لتفادي حظر الـ WebView والتعليق
+      if (normAir.includes("اديل") || normAir.includes("flyadeal") || normAir.includes("دمج ذكي")) {
+        const roundQuery = isRound ? `%20through%20${retC}` : '';
+        const carrierFilter = normAir.includes("دمج ذكي") ? '' : '%20flyadeal';
+        return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}${roundQuery}%20nonstop${carrierFilter}&curr=SAR&hl=ar&gl=sa`;
       }
 
-      if (normAir.includes("اديل") || normAir.includes("flyadeal")) {
-        return `https://www.flyadeal.com/ar/search-flight?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
-      } else if (normAir.includes("ناس") || normAir.includes("flynas")) {
+      if (normAir.includes("ناس") || normAir.includes("flynas")) {
         return `https://www.flynas.com/ar/booking/flight-search?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
       } else if (normAir.includes("السعوديه") || normAir.includes("saudia")) {
         return `https://www.saudia.com/ar/booking?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
@@ -458,9 +448,7 @@
             processData(parsed, true);
           }
         }
-      } catch (e) {
-        console.warn("فشل قراءة الذاكرة المؤقتة:", e);
-      }
+      } catch (e) {}
     }
 
     function processData(data, isFromCache = false) {
@@ -525,7 +513,7 @@
         if (isFromCache) {
           updateLabel.innerText = "بيانات محفوظة: " + (data.updated_at || "مسبقاً");
         } else {
-          updateLabel.innerText = "آخر فحص حي: " + (data.updated_at || "الآن");
+          updateLabel.innerText = "آخر فحص: " + (data.updated_at || "الآن");
           try {
             localStorage.setItem('qassim_radar_cache', JSON.stringify(data));
           } catch(e) {}
@@ -557,7 +545,6 @@
       } catch (err) {
         clearTimeout(timeoutId);
         if (err.name === 'AbortError') return;
-        console.error("خطأ في جلب البيانات:", err);
         const updateLabel = document.getElementById('lastUpdateText');
         if (updateLabel) {
           if (rawFlights.length === 0) {
@@ -567,7 +554,7 @@
               container.innerHTML = `
                 <div class="bg-slate-800/40 border border-rose-900/40 rounded-2xl p-6 text-center text-slate-400 space-y-2">
                   <div class="text-rose-400 font-bold">⚠️ تعذر مزامنة الرحلات الحية</div>
-                  <div class="text-xs">تأكد من اتصالك بالإنترنت أو أعد المحاولة لاحقاً.</div>
+                  <div class="text-xs">اضغط على زر 🔄 لإعادة الفحص عند توفر اتصال.</div>
                 </div>`;
             }
           } else {
@@ -653,7 +640,7 @@
       if (isInitialLoading && rawFlights.length === 0) {
         container.innerHTML = `
           <div class="bg-slate-800/50 border border-slate-700/40 rounded-2xl p-6 text-center text-slate-400">
-            جاري تحميل وتجهيز مسارات الأسعار...
+            جاري فحص وتحديث أسعار الرحلات...
           </div>`;
         return;
       }
@@ -750,7 +737,6 @@
           }
         }
 
-        // بناء الرابط المباشر متضمناً عدد الركاب المختارين ديناميكياً
         const directLink = buildDirectAirlineUrl(item.airline, item.dep, item.ret, item.trip_type, pax);
         const hotelInfo = buildHotelInfo(item.dep, item.ret, item.trip_type);
         const shortName = getAirlineShortName(item.airline);
@@ -836,7 +822,6 @@
       });
     }
 
-    // بدء التشغيل: استرجاع التفضيلات، استعراض الكاش فوراً، ثم المزامنة الحية في الخلفية
     loadUserPreferences();
     loadCachedData();
     fetchLatestData();
