@@ -12,7 +12,7 @@
   })();
   </script>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>رادار طيران القصيم ⇄ جدة الذكي</title>
   
   <!-- Telegram WebApp SDK -->
@@ -37,7 +37,11 @@
     }
   </script>
   <style>
-    body { font-family: 'Tajawal', sans-serif; -webkit-tap-highlight-color: transparent; }
+    body { 
+      font-family: 'Tajawal', sans-serif; 
+      -webkit-tap-highlight-color: transparent;
+      padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     @keyframes spin-fast {
@@ -47,7 +51,7 @@
     .animate-spin-custom { animation: spin-fast 0.75s linear infinite; }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen pb-12 select-none">
+<body class="bg-slate-900 text-slate-100 min-h-screen select-none">
 
   <!-- Header Section -->
   <header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3">
@@ -165,7 +169,6 @@
   </main>
 
   <script>
-    // تهيئة محصنة لبيئة Telegram WebApp SDK دون رمي أخطاء في الإصدارات القديمة
     const tg = (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
     if (tg) {
       try {
@@ -189,6 +192,7 @@
     let marketStats = { avg_price: 0, min_price: 0, total: 0 };
     let activeFilter = 'all';
     let isInitialLoading = true;
+    let renderRafId = null;
 
     function triggerHaptic(type = 'light') {
       try {
@@ -209,9 +213,10 @@
 
     function handleSliderChange() {
       triggerHaptic('selection_changed');
-      if (!isInitialLoading) {
-        renderFlights();
-      }
+      if (renderRafId) cancelAnimationFrame(renderRafId);
+      renderRafId = requestAnimationFrame(() => {
+        if (!isInitialLoading) renderFlights();
+      });
     }
 
     function openBookingUrl(url) {
@@ -228,7 +233,6 @@
       }
     }
 
-    // دالة تعقيم لمنع ثغرات XSS وحماية المتصفح من ابتلاع النصوص التي تحتوي على "<"
     function escapeHtml(text) {
       if (text === null || text === undefined) return "";
       return String(text)
@@ -239,7 +243,6 @@
         .replace(/'/g, "&#039;");
     }
 
-    // استخراج السعر الرقمي بأعلى درجات المناعة ضد الفواصل والأرقام المشرقية
     function parsePrice(val) {
       if (typeof val === 'number') return isNaN(val) ? 0 : Math.round(val);
       if (!val) return 0;
@@ -255,14 +258,18 @@
       return m ? m[0].replace(/\//g, '-') : "";
     }
 
-    // حساب التاريخ القياسي بتوقيت مكة المكرمة (UTC+3) لحماية حجز الفنادق بعد منتصف الليل
     function getKsaTodayString() {
-      const now = new Date();
-      const ksaTime = new Date(now.getTime() + (3 * 3600000 + now.getTimezoneOffset() * 60000));
-      const y = ksaTime.getFullYear();
-      const m = String(ksaTime.getMonth() + 1).padStart(2, '0');
-      const d = String(ksaTime.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
+      try {
+        const formatter = new Intl.DateTimeFormat('en-CA', { 
+          timeZone: 'Asia/Riyadh', 
+          year: 'numeric', 
+          month: '2-digit', 
+          day: '2-digit' 
+        });
+        return formatter.format(new Date());
+      } catch (e) {
+        return new Date().toISOString().slice(0, 10);
+      }
     }
 
     function addDays(dateStr, days) {
@@ -324,7 +331,6 @@
       const origin = isOneWayIn ? "JED" : "ELQ";
       const destination = isOneWayIn ? "ELQ" : "JED";
 
-      // تحصين رحلات الدمج الذكي: التوجيه لمحرك المقارنة الرسمي لمنع فشل الحجز في موقع شركة واحدة
       if (air.includes("دمج ذكي")) {
         return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}${isRound ? '%20through%20' + retC : ''}%20nonstop&curr=SAR&hl=ar&gl=sa`;
       }
@@ -342,14 +348,12 @@
     function buildHotelUrl(dep, ret) {
       const checkIn = cleanDate(dep) || getKsaTodayString();
       let checkOut = cleanDate(ret);
-      // تحصين حجز الفنادق ضد خطأ 0 ليالٍ
       if (!checkOut || checkOut <= checkIn) {
         checkOut = addDays(checkIn, 1);
       }
       return `https://search.hotellook.com/?destination=Jeddah&checkIn=${checkIn}&checkOut=${checkOut}&marker=${TRAVELPAYOUTS_MARKER}&language=ar&currency=SAR`;
     }
 
-    // استعراض الكاش المحلي الفوري لتشغيل التطبيق في أقل من 0.2 ثانية
     function loadCachedData() {
       try {
         const cached = localStorage.getItem('qassim_radar_cache');
@@ -429,7 +433,7 @@
 
     async function fetchLatestData(forceRefresh = false) {
       try {
-        const res = await fetch('./flights_data.json?v=' + Date.now());
+        const res = await fetch('./flights_data.json?v=' + Date.now(), { cache: 'no-store' });
         if (!res.ok) throw new Error("تعذر جلب البيانات السحابية");
         const data = await res.json();
         processData(data, false);
@@ -455,17 +459,18 @@
     }
 
     function updateStats() {
-      if (!rawFlights || rawFlights.length === 0) return;
-      const sortedByPrice = [...rawFlights].sort((a, b) => a.price - b.price);
+      const validFlights = rawFlights.filter(f => f.price > 0);
+      if (validFlights.length === 0) return;
+      const sortedByPrice = [...validFlights].sort((a, b) => a.price - b.price);
       const lowest = sortedByPrice[0];
 
       document.getElementById('statLowestPrice').innerText = lowest.price;
       document.getElementById('statLowestAirline').innerText = getAirlineShortName(lowest.airline);
 
-      const avg = marketStats.avg_price || Math.round(rawFlights.reduce((acc, cur) => acc + cur.price, 0) / rawFlights.length);
+      const avg = marketStats.avg_price || Math.round(validFlights.reduce((acc, cur) => acc + cur.price, 0) / validFlights.length);
       document.getElementById('statAvgPrice').innerText = avg;
 
-      const highestScoreItem = [...rawFlights].sort((a, b) => b.score - a.score)[0];
+      const highestScoreItem = [...validFlights].sort((a, b) => b.score - a.score)[0];
       const badgeEl = document.getElementById('statDecisionBadge');
       const subEl = document.getElementById('statDecisionSub');
 
@@ -512,7 +517,7 @@
       let filtered = [...rawFlights];
 
       if (activeFilter === 'deals') {
-        filtered = filtered.filter(x => x.price <= 390);
+        filtered = filtered.filter(x => x.price <= 390 && x.price > 0);
       } else if (activeFilter === 'high_confidence') {
         filtered = filtered.filter(x => x.score >= 85);
       } else if (activeFilter === 'adeal') {
@@ -567,8 +572,8 @@
           `<div class="text-xs text-slate-400 mt-0.5">عودة: <code>${escapeHtml(cleanDate(item.ret))}</code></div>`;
 
         let savingBadge = "";
-        if (item.price < marketAvg && marketAvg > 0) {
-          const discountPct = Math.round(((marketAvg - item.price) / marketAvg) * 100);
+        if (item.price < marketAvg && marketAvg > 0 && item.price > 0) {
+          const discountPct = Math.min(95, Math.max(1, Math.round(((marketAvg - item.price) / marketAvg) * 100)));
           if (discountPct >= 10) {
             savingBadge = `<span class="text-[10px] font-extrabold text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-700/60">وفر ${discountPct}%</span>`;
           }
@@ -608,7 +613,7 @@
             </div>
           </div>
 
-          <!-- شريط الثقة والتنبؤ الاحتمالي المعقم ضد أخطاء الـ HTML -->
+          <!-- شريط الثقة والتنبؤ الاحتمالي -->
           <div class="bg-slate-900/60 border border-slate-700/50 rounded-xl p-2.5 space-y-2">
             <div class="flex items-center justify-between text-xs">
               <span class="text-slate-400 flex items-center gap-1">
@@ -627,7 +632,7 @@
             </p>
           </div>
 
-          <!-- أزرار الإجراءات التفاعلية المرتبطة برمجياً دون تداخل نصوص -->
+          <!-- أزرار الإجراءات التفاعلية المرتبطة برمجياً -->
           <div class="grid grid-cols-2 gap-2 pt-0.5">
             <button class="btn-direct-booking flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-md">
               <span>حجز مباشر (${escapeHtml(shortName)})</span>
@@ -640,7 +645,6 @@
           </div>
         `;
 
-        // ربط الأحداث برمجياً لحصانة تامة ضد انهيار وسوم onclick أو علامات الاقتباس
         const directBtn = card.querySelector('.btn-direct-booking');
         if (directBtn) {
           directBtn.addEventListener('click', () => openBookingUrl(directLink));
