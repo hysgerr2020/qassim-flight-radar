@@ -1,5 +1,6 @@
 import calendar
 import datetime
+import gzip
 import html as html_lib
 import json
 import os
@@ -16,6 +17,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from playwright.sync_api import sync_playwright
+
+# جدول مطابقة لتحويل الأرقام المشرقية (٠-٩) إلى أرقام قياسية تلقائياً
+AR_NUM_MAP = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
 
 # ==========================================
 # ⚙️ قراءة المتغيرات السحابية وتنظيفها
@@ -56,7 +60,8 @@ def clean_date_str(date_input):
     """استخلاص صيغة التاريخ القياسية YYYY-MM-DD بدقة وحمايتها من الأوقات أو الرموز"""
     if not date_input:
         return ""
-    match = re.search(r'\b\d{4}[-/]\d{2}[-/]\d{2}\b', str(date_input))
+    normalized = str(date_input).translate(AR_NUM_MAP)
+    match = re.search(r'\b\d{4}[-/]\d{2}[-/]\d{2}\b', normalized)
     return match.group(0).replace('/', '-') if match else ""
 
 def get_baggage_fee(airline_name, is_one_way=False):
@@ -478,9 +483,11 @@ def parse_airline_name(text):
     return "رحلة مباشرة"
 
 def parse_flight_card_text(text):
+    # تطهير النص وتحويل أي أرقام مشرقية إلى أرقام لاتينية قياسية
+    norm_text = text.translate(AR_NUM_MAP)
     time_ar = ""
     raw_time = ""
-    m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)', text)
+    m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)', norm_text)
     if m_time:
         raw_time = m_time.group(1).strip()
         if re.search(r'[a-zA-Z]', raw_time):
@@ -498,7 +505,7 @@ def parse_flight_card_text(text):
                 time_ar = raw_time
 
     # إزالة محددة لمدد الرحلات والأوزان دون التهام الأسعار
-    cleaned = re.sub(r'\b\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?\b', '', text)
+    cleaned = re.sub(r'\b\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?\b', '', norm_text)
     cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|ساعة|ساعات|دقيقة|دقائق|kg|كجم|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
 
     price = None
@@ -514,7 +521,7 @@ def parse_flight_card_text(text):
         except Exception:
             continue
 
-    airline = parse_airline_name(text)
+    airline = parse_airline_name(norm_text)
     return price, airline, time_ar, raw_time
 
 # ==========================================
@@ -822,7 +829,12 @@ def fallback_http_probe(dep, ret="", trip_type="roundtrip"):
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as response:
-            html = html_lib.unescape(response.read().decode("utf-8", errors="ignore"))
+            raw_data = response.read()
+            # حماية فك الضغط التلقائي إذا أرسل الخادم استجابة Gzip
+            if raw_data.startswith(b'\x1f\x8b'):
+                raw_data = gzip.decompress(raw_data)
+
+            html = html_lib.unescape(raw_data.decode("utf-8", errors="ignore")).translate(AR_NUM_MAP)
             prices = re.findall(r'(?:SAR|ر\.س)[\s\xa0]*([0-9]{2,4}(?:\.\d+)?)|([0-9]{2,4}(?:\.\d+)?)[\s\xa0]*(?:SAR|ر\.س)|[\"\']SAR[\"\']\s*,\s*([0-9]{2,4})', html)
             valid_prices = []
             for g1, g2, g3 in prices:
@@ -863,7 +875,9 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-infobars"
+                "--disable-infobars",
+                "--disable-gpu",
+                "--no-zygote"
             ]
         )
         try:
@@ -992,7 +1006,9 @@ def run_cloud_scan():
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
-                    "--disable-infobars"
+                    "--disable-infobars",
+                    "--disable-gpu",
+                    "--no-zygote"
                 ]
             )
 
