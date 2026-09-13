@@ -174,6 +174,10 @@
   </main>
 
   <script>
+    // تفعيل أحداث اللمس على iOS فورياً
+    document.addEventListener('touchstart', function() {}, { passive: true });
+
+    // تهيئة محصنة لـ Telegram WebApp SDK
     const tg = (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
     if (tg) {
       try {
@@ -199,8 +203,8 @@
     let isInitialLoading = true;
     let renderRafId = null;
     let isOpeningUrl = false;
+    let activeFetchController = null;
 
-    // توحيد النصوص العربية ومعايرتها لحظر أي خطأ في مطابقة الهمزات والتاء المربوطة
     function normalizeArabic(str) {
       if (!str) return "";
       return String(str)
@@ -250,7 +254,6 @@
 
     function openBookingUrl(url) {
       if (!url || isOpeningUrl) return;
-      // التحقق الصارم من البروتوكول لمنع ثغرات الحقن
       if (!/^https?:\/\//i.test(url)) {
         console.warn("Blocked invalid protocol URL:", url);
         return;
@@ -281,7 +284,6 @@
         .replace(/'/g, "&#039;");
     }
 
-    // استخراج الأرقام بمرونة كاملة حتى لو كانت مسبوقة بـ "SAR" أو "ر.س"
     function parsePrice(val) {
       if (typeof val === 'number') return isNaN(val) ? 0 : Math.round(val);
       if (!val) return 0;
@@ -292,6 +294,7 @@
       return isNaN(n) ? 0 : Math.round(n);
     }
 
+    // استخراج التاريخ بدعم الخانات الفردية والزوجية وصيغ YYYY-M-D
     function cleanDate(d) {
       if (!d) return "";
       if (d instanceof Date && !isNaN(d.getTime())) {
@@ -301,12 +304,14 @@
         return `${y}-${m}-${day}`;
       }
       let s = String(d).replace(/[٠-٩]/g, w => AR_NUM_MAP[w] || w);
-      // دعم YYYY-MM-DD
-      const m = s.match(/\b\d{4}[-/]\d{2}[-/]\d{2}\b/);
-      if (m) return m[0].replace(/\//g, '-');
-      // دعم صيغة DD-MM-YYYY إذا وردت
-      const mRev = s.match(/\b(\d{2})[-/](\d{2})[-/](\d{4})\b/);
-      if (mRev) return `${mRev[3]}-${mRev[2]}-${mRev[1]}`;
+      const m = s.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/);
+      if (m) {
+        return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+      }
+      const mRev = s.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
+      if (mRev) {
+        return `${mRev[3]}-${String(mRev[2]).padStart(2, '0')}-${String(mRev[1]).padStart(2, '0')}`;
+      }
       return "";
     }
 
@@ -397,7 +402,6 @@
       return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}${isRound ? '%20through%20' + retC : ''}%20nonstop&curr=SAR&hl=ar&gl=sa`;
     }
 
-    // توجيه الفنادق بذكاء حسب اتجاه الرحلة (جدة أم القصيم)
     function buildHotelInfo(dep, ret, tripType) {
       const todayKsa = getKsaTodayString();
       let checkIn = cleanDate(dep) || todayKsa;
@@ -426,19 +430,20 @@
 
     function loadUserPreferences() {
       try {
-        const savedPax = localStorage.getItem('qassim_radar_pax');
-        const savedBags = localStorage.getItem('qassim_radar_bags');
-        if (savedPax) {
+        const savedPax = parseInt(localStorage.getItem('qassim_radar_pax'), 10);
+        const savedBags = parseInt(localStorage.getItem('qassim_radar_bags'), 10);
+        
+        if (!isNaN(savedPax) && savedPax >= 1 && savedPax <= 6) {
           const paxEl = document.getElementById('paxSlider');
           const paxValEl = document.getElementById('paxValue');
-          if (paxEl) paxEl.value = savedPax;
-          if (paxValEl) paxValEl.innerText = savedPax;
+          if (paxEl) paxEl.value = String(savedPax);
+          if (paxValEl) paxValEl.innerText = String(savedPax);
         }
-        if (savedBags) {
+        if (!isNaN(savedBags) && savedBags >= 0 && savedBags <= 4) {
           const bagEl = document.getElementById('bagSlider');
           const bagValEl = document.getElementById('bagValue');
-          if (bagEl) bagEl.value = savedBags;
-          if (bagValEl) bagValEl.innerText = savedBags;
+          if (bagEl) bagEl.value = String(savedBags);
+          if (bagValEl) bagValEl.innerText = String(savedBags);
         }
       } catch(e) {}
     }
@@ -507,7 +512,7 @@
           ret: retVal,
           airline: airlineVal,
           price: price,
-          link: buildDirectAirlineUrl(airlineVal, depVal, retVal, tripTypeVal),
+          link: item["الرابط"] || item.link || buildDirectAirlineUrl(airlineVal, depVal, retVal, tripTypeVal),
           score: score,
           recommendation: rec,
           forecast: forecast,
@@ -532,14 +537,19 @@
       renderFlights();
     }
 
+    // معالجة شبكية محصنة ضد تسابق الطلبات
     async function fetchLatestData(forceRefresh = false) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 9000);
+      if (activeFetchController) {
+        activeFetchController.abort();
+      }
+      activeFetchController = new AbortController();
+      const signal = activeFetchController.signal;
+      const timeoutId = setTimeout(() => activeFetchController.abort(), 9000);
 
       try {
         const res = await fetch('./flights_data.json?v=' + Date.now(), { 
           cache: 'no-store',
-          signal: controller.signal
+          signal: signal
         });
         clearTimeout(timeoutId);
         if (!res.ok) throw new Error("تعذر جلب البيانات السحابية");
@@ -547,6 +557,7 @@
         processData(data, false);
       } catch (err) {
         clearTimeout(timeoutId);
+        if (err.name === 'AbortError') return; // تم إلغاء الطلب لصالح طلب أحدث
         console.error("خطأ في جلب البيانات:", err);
         const updateLabel = document.getElementById('lastUpdateText');
         if (updateLabel) {
@@ -598,18 +609,26 @@
       }
     }
 
+    // دالة الرجوع كمرجع ثابت لمنع تسريب الذاكرة
+    function handleBackButton() {
+      setFilter('all');
+    }
+
     function setFilter(type) {
       triggerHaptic('selection_changed');
       activeFilter = type;
 
-      // تفعيل زر الرجوع الأصلي لتيليجرام
+      // إدارة نظيفة لزر الرجوع دون تراكم المستمعين
       if (tg && tg.BackButton) {
-        if (activeFilter !== 'all') {
-          tg.BackButton.show();
-          tg.BackButton.onClick(() => setFilter('all'));
-        } else {
-          tg.BackButton.hide();
-        }
+        try {
+          tg.BackButton.offClick(handleBackButton);
+          if (activeFilter !== 'all') {
+            tg.BackButton.show();
+            tg.BackButton.onClick(handleBackButton);
+          } else {
+            tg.BackButton.hide();
+          }
+        } catch (e) {}
       }
 
       document.querySelectorAll('.filter-btn').forEach(b => {
@@ -721,7 +740,6 @@
           }
         }
 
-        // تفصيل الأمتعة لحظر ارتباك المسافر عند اختيار حقائب مع الخطوط السعودية
         const isSaudia = normAir.includes("السعوديه") && !normAir.includes("دمج ذكي");
         let bagStatusHtml = "";
         if (bags > 0) {
@@ -805,7 +823,7 @@
       container.appendChild(fragment);
     }
 
-    // تفعيل مستمع الأحداث المركزي مرة واحدة
+    // تفعيل مستمع الأحداث المركزي مرة واحدة بحصانة تامة
     const flightsContainer = document.getElementById('flightsList');
     if (flightsContainer) {
       flightsContainer.addEventListener('click', (e) => {
