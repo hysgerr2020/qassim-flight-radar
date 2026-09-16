@@ -223,6 +223,12 @@
       triggerHaptic('medium');
       const icon = document.getElementById('refreshIcon');
       if (icon) icon.classList.add('animate-spin-custom');
+      
+      // تصفير الكاش المحلي المحفوظ لضمان جلب النسخة السحابية الجديدة تماماً
+      try {
+        localStorage.removeItem('qassim_radar_cache');
+      } catch (e) {}
+
       fetchLatestData(true).finally(() => {
         if (icon) icon.classList.remove('animate-spin-custom');
       });
@@ -470,10 +476,10 @@
           if (price <= 358) {
             score = 96; rec = "احجز فوراً (قاع تاريخي)";
             forecast = "السعر في القاع الترويجي الأدنى."; level = "high";
-          } else if (price <= 420) {
+          } else if (price <= 480) {
             score = 87; rec = "سعر اقتصادي ممتاز";
             forecast = "سعر مناسب جداً داخل نافذة الشراء الآمنة."; level = "high";
-          } else if (price <= 550) {
+          } else if (price <= 640) {
             score = 65; rec = "سعر متوسط";
             forecast = "إمكانية طرح مقاعد مخفضة لاحقاً."; level = "medium";
           } else {
@@ -534,8 +540,13 @@
       const timeoutId = setTimeout(() => activeFetchController.abort(), 9000);
 
       try {
-        const res = await fetch('./flights_data.json?v=' + Date.now(), { 
+        // كسر الكاش الصارم بمنع التخزين المؤقت تماماً وضمان مطابقة شيت الإكسيل لحظياً
+        const res = await fetch('./flights_data.json?t=' + Date.now(), { 
           cache: 'no-store',
+          headers: {
+            'Pragma': 'no-cache',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          },
           signal: signal
         });
         clearTimeout(timeoutId);
@@ -655,7 +666,7 @@
       if (activeFilter === 'deals') {
         filtered = filtered.filter(x => {
           const isOne = !cleanDate(x.ret);
-          return isOne ? (x.price <= 210) : (x.price <= 390);
+          return isOne ? (x.price <= 240) : (x.price <= 480);
         });
       } else if (activeFilter === 'high_confidence') {
         filtered = filtered.filter(x => x.score >= 85);
@@ -679,7 +690,7 @@
         return;
       }
 
-      const marketAvg = marketStats.avg_price || 420;
+      const marketAvg = marketStats.avg_price || 480;
       const fragment = document.createDocumentFragment();
 
       filtered.forEach(item => {
@@ -764,10 +775,12 @@
               ${returnHtml}
             </div>
 
+            <!-- عرض السعر الإجمالي الصافي والسعر الأساسي لإنهاء التعارض مع الإكسيل تماماً -->
             <div class="text-left">
-              <span class="text-xs text-slate-400 block">${pax > 1 || bags > 0 ? 'التكلفة الإجمالية' : 'السعر'}</span>
+              <span class="text-xs text-slate-400 block">${pax > 1 || bags > 0 ? 'الإجمالي بالحاسبة' : 'سعر التذكرة'}</span>
               <span class="text-2xl font-black text-white">${finalPrice}</span>
               <span class="text-xs text-slate-300">ر.س</span>
+              ${pax > 1 || bags > 0 ? `<span class="text-[10px] text-slate-400 block">(الأساس: ${item.price} ر.س)</span>` : ''}
               ${bagStatusHtml}
             </div>
           </div>
