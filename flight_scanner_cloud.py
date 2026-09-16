@@ -478,10 +478,10 @@ def parse_airline_name(text):
     return "رحلة مباشرة"
 
 def parse_flight_card_text(text, card_element=None):
-    """استخراج دقيق للوقت والسعر الفعلي للتذكرة مع تمييز الذهاب والعودة"""
+    """استخراج السعر الإجمالي الحقيقي للذهاب والعودة معاً بدقة متطابقة بدون مضاعفة تقديرية"""
     norm_text = text.translate(AR_NUM_MAP)
-    txt_lower = norm_text.lower()
     
+    # 1. استخراج توقيت الإقلاع
     time_ar = ""
     raw_time = ""
     m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
@@ -502,9 +502,10 @@ def parse_flight_card_text(text, card_element=None):
 
     price = None
 
-    # 1. الاستخراج المباشر من عنصر السعر
+    # 2. قراءة السعر الإجمالي الصافي المعروض رسمياً للرحلتين
     if card_element is not None:
         try:
+            # استهداف عنصر السعر الكلي الحقيقي
             for sel in [".YMlIz", "div.FRPre", "[aria-label*='SAR']", "[aria-label*='Saudi Riyal']", "[aria-label*='ريال']"]:
                 p_el = card_element.locator(sel).first
                 if p_el.count() > 0:
@@ -512,13 +513,14 @@ def parse_flight_card_text(text, card_element=None):
                     m = re.search(r'([\d,]+)', p_text.replace('\xa0', '').replace(' ', ''))
                     if m:
                         val = int(m.group(1).replace(',', ''))
-                        if 100 <= val <= 5000:
+                        # تذكرة الذهاب والعودة الصافية لا تقل عن 300 ريال
+                        if 300 <= val <= 5000:
                             price = val
                             break
         except Exception:
             pass
 
-    # 2. الاستخراج الاحتياطي من النص
+    # 3. في حال لم يتوفر السعر الإجمالي، استخراجه من نص البطاقة الشامل للرحلتين
     if not price:
         cleaned = re.sub(r'\b\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?\b', '', norm_text)
         cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|ساعة|ساعات|دقيقة|دقائق|kg|كجم|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
@@ -527,7 +529,7 @@ def parse_flight_card_text(text, card_element=None):
             raw_val = m1 if m1 else m2
             try:
                 v = int(float(raw_val.replace(',', '')))
-                if 100 <= v <= 5000:
+                if 300 <= v <= 5000:
                     price = v
                     break
             except Exception:
@@ -535,11 +537,6 @@ def parse_flight_card_text(text, card_element=None):
 
     if not price:
         return None, "", "", ""
-
-    # تصحيح ذكي: إذا كانت الرحلة معروضة كاتجاه واحد (أقل من 300 ر.س لطيران أديل)، يتم احتساب التكلفة للاتجاهين
-    is_explicit_oneway = "one way" in txt_lower or "اتجاه واحد" in norm_text or price <= 260
-    if is_explicit_oneway:
-        price = price * 2
 
     airline = parse_airline_name(norm_text)
     return price, airline, time_ar, raw_time
