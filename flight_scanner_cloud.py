@@ -478,8 +478,10 @@ def parse_airline_name(text):
     return "رحلة مباشرة"
 
 def parse_flight_card_text(text, card_element=None):
-    """استخراج دقيق للوقت والسعر الفعلي للتذكرة"""
+    """استخراج دقيق للوقت والسعر الفعلي للتذكرة مع تمييز الذهاب والعودة"""
     norm_text = text.translate(AR_NUM_MAP)
+    txt_lower = norm_text.lower()
+    
     time_ar = ""
     raw_time = ""
     m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
@@ -500,7 +502,7 @@ def parse_flight_card_text(text, card_element=None):
 
     price = None
 
-    # الاستخراج المباشر من عنصر السعر
+    # 1. الاستخراج المباشر من عنصر السعر
     if card_element is not None:
         try:
             for sel in [".YMlIz", "div.FRPre", "[aria-label*='SAR']", "[aria-label*='Saudi Riyal']", "[aria-label*='ريال']"]:
@@ -516,6 +518,7 @@ def parse_flight_card_text(text, card_element=None):
         except Exception:
             pass
 
+    # 2. الاستخراج الاحتياطي من النص
     if not price:
         cleaned = re.sub(r'\b\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?\b', '', norm_text)
         cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|ساعة|ساعات|دقيقة|دقائق|kg|كجم|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
@@ -529,6 +532,14 @@ def parse_flight_card_text(text, card_element=None):
                     break
             except Exception:
                 continue
+
+    if not price:
+        return None, "", "", ""
+
+    # تصحيح ذكي: إذا كانت الرحلة معروضة كاتجاه واحد (أقل من 300 ر.س لطيران أديل)، يتم احتساب التكلفة للاتجاهين
+    is_explicit_oneway = "one way" in txt_lower or "اتجاه واحد" in norm_text or price <= 260
+    if is_explicit_oneway:
+        price = price * 2
 
     airline = parse_airline_name(norm_text)
     return price, airline, time_ar, raw_time
