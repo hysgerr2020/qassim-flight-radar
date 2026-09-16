@@ -479,10 +479,10 @@ def parse_airline_name(text):
     return "رحلة مباشرة"
 
 def parse_flight_card_text(text, card_element=None):
-    """استخراج السعر الإجمالي الحقيقي للذهاب والعودة معاً بدقة متطابقة بدون مضاعفة تقديرية"""
+    """استخراج أدق وأشمل للسعر الفعلي الصافي المطابق للموقع الرسمي"""
     norm_text = text.translate(AR_NUM_MAP)
     
-    # 1. استخراج توقيت الإقلاع
+    # 1. استخراج التوقيت
     time_ar = ""
     raw_time = ""
     m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
@@ -503,38 +503,42 @@ def parse_flight_card_text(text, card_element=None):
 
     price = None
 
-    # 2. قراءة السعر الإجمالي الصافي المعروض رسمياً للرحلتين
+    # 2. الاستخراج الدقيق للسعر الصافي من عناصر واجهة Google Flights
     if card_element is not None:
         try:
-            # استهداف عنصر السعر الكلي الحقيقي
-            for sel in [".YMlIz", "div.FRPre", "[aria-label*='SAR']", "[aria-label*='Saudi Riyal']", "[aria-label*='ريال']"]:
-                p_el = card_element.locator(sel).first
-                if p_el.count() > 0:
-                    p_text = p_el.inner_text().translate(AR_NUM_MAP)
-                    m = re.search(r'([\d,]+)', p_text.replace('\xa0', '').replace(' ', ''))
-                    if m:
-                        val = int(m.group(1).replace(',', ''))
-                        # تذكرة الذهاب والعودة الصافية لا تقل عن 300 ريال
-                        if 300 <= val <= 5000:
-                            price = val
-                            break
+            # البحث عن وسم السعر المعتمد في كروت جوجل
+            price_element = card_element.locator("[aria-label*='ريال'], [aria-label*='SAR'], span[role='text']").first
+            if price_element.count() > 0:
+                p_text = price_element.get_attribute("aria-label") or price_element.inner_text()
+                p_clean = p_text.translate(AR_NUM_MAP)
+                m = re.search(r'([\d,]+)\s*(?:ريال|SAR|ر\.س)', p_clean)
+                if m:
+                    price = int(m.group(1).replace(',', ''))
         except Exception:
             pass
 
-    # 3. في حال لم يتوفر السعر الإجمالي، استخراجه من نص البطاقة الشامل للرحلتين
+    # 3. التحليل البديل في حال تعذر قراءة العنصر المحدد
     if not price:
+        # عزل نصوص التوقيت والمدد لتجنب التداخل
         cleaned = re.sub(r'\b\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?\b', '', norm_text)
         cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|ساعة|ساعات|دقيقة|دقائق|kg|كجم|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
-        matches = re.findall(r'(?:sar|ر\.س|ريال|sr)\s*([\d,]+(?:\.\d+)?)|([\d,]+(?:\.\d+)?)\s*(?:sar|ر\.س|ريال|sr)', cleaned, re.IGNORECASE)
+        
+        # البحث الصريح عن الأرقام المقترنة بالعملة
+        matches = re.findall(r'([\d,]+)\s*(?:ريال|ر\.س|SAR)|(?:ريال|ر\.س|SAR)\s*([\d,]+)', cleaned, re.IGNORECASE)
+        found_prices = []
         for m1, m2 in matches:
-            raw_val = m1 if m1 else m2
-            try:
-                v = int(float(raw_val.replace(',', '')))
-                if 300 <= v <= 5000:
-                    price = v
-                    break
-            except Exception:
-                continue
+            val = m1 or m2
+            if val:
+                try:
+                    num = int(val.replace(',', ''))
+                    # استبعاد الأرقام الشاذة جداً
+                    if 120 <= num <= 4000:
+                        found_prices.append(num)
+                except Exception:
+                    continue
+        if found_prices:
+            # اختيار السعر الأقل في البطاقة (وهو السعر الأساسي المقارن)
+            price = min(found_prices)
 
     if not price:
         return None, "", "", ""
