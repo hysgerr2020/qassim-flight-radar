@@ -119,19 +119,20 @@ REALISTIC_PROFILES = [
 ]
 
 # ==========================================
-# 🔗 بناء روابط البحث الصحيحة التي يفهمها محرك جوجل
+# 🔗 بناء روابط البحث الصحيحة المؤكدة لرحلات الذهاب والعودة
 # ==========================================
 def build_google_flights_url(dep_clean, ret_clean="", trip_type="roundtrip"):
     origin = "JED" if trip_type == "oneway_in" else "ELQ"
     destination = "ELQ" if trip_type == "oneway_in" else "JED"
 
     if trip_type == "oneway_out":
-        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        return f"https://www.google.com/travel/flights?q=oneway%20flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
     elif trip_type == "oneway_in":
-        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        return f"https://www.google.com/travel/flights?q=oneway%20flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
     else:
-        # الصيغة الطبيعية المعتمدة لرحلات الذهاب والعودة في محرك Google Flights
-return f"https://www.google.com/travel/flights?q=round-trip%20flights%20from%20{origin}%20to%20{destination}%20from%20{dep_clean}%20to%20{ret_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        # إجبار محرك جوجل على قفل خيار الذهاب والعودة واستخراج السعر الإجمالي الصافي
+        return f"https://www.google.com/travel/flights?q=round-trip%20flights%20from%20{origin}%20to%20{destination}%20from%20{dep_clean}%20to%20{ret_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+
 # ==========================================
 # 🧹 تطهير وأرشفة البيانات التاريخية
 # ==========================================
@@ -860,7 +861,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
 
                 page.mouse.wheel(0, random.randint(150, 300))
                 try:
-                    page.wait_for_selector("li.pIav2d, div.pIav2d, [role='listitem']", timeout=7000)
+                    page.wait_for_selector("li.pIav2d, div.pIav2d, [role='listitem']", timeout=10000)
                 except Exception:
                     time.sleep(2)
 
@@ -1024,7 +1025,7 @@ def run_cloud_scan():
                             page.mouse.wheel(0, random.randint(100, 250))
 
                             try:
-                                page.wait_for_selector("li.pIav2d, div.pIav2d, [role='listitem']", timeout=6000)
+                                page.wait_for_selector("li.pIav2d, div.pIav2d, [role='listitem']", timeout=10000)
                             except Exception:
                                 time.sleep(1.2)
 
