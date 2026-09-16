@@ -122,16 +122,17 @@ REALISTIC_PROFILES = [
 # 🔗 بناء روابط البحث الصحيحة المؤكدة لرحلات الذهاب والعودة
 # ==========================================
 def build_google_flights_url(dep_clean, ret_clean="", trip_type="roundtrip"):
+    """بناء رابط بحث قياسي يفتح صفحة المقارنة الشاملة مباشرة"""
     origin = "JED" if trip_type == "oneway_in" else "ELQ"
     destination = "ELQ" if trip_type == "oneway_in" else "JED"
 
     if trip_type == "oneway_out":
-        return f"https://www.google.com/travel/flights?q=oneway%20flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        return f"https://www.google.com/travel/flights?q=Flights%20to%20{destination}%20from%20{origin}%20on%20{dep_clean}%20one-way%20nonstop&curr=SAR&hl=ar&gl=sa"
     elif trip_type == "oneway_in":
-        return f"https://www.google.com/travel/flights?q=oneway%20flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        return f"https://www.google.com/travel/flights?q=Flights%20to%20{destination}%20from%20{origin}%20on%20{dep_clean}%20one-way%20nonstop&curr=SAR&hl=ar&gl=sa"
     else:
-        # إجبار محرك جوجل على قفل خيار الذهاب والعودة واستخراج السعر الإجمالي الصافي
-        return f"https://www.google.com/travel/flights?q=round-trip%20flights%20from%20{origin}%20to%20{destination}%20from%20{dep_clean}%20to%20{ret_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        # رابط مباشر يجبر الصفحة على احتساب وعرض السعر الإجمالي لكلا المسارين معاً
+        return f"https://www.google.com/travel/flights?q=Flights%20to%20{destination}%20from%20{origin}%20on%20{dep_clean}%20through%20{ret_clean}%20round-trip%20nonstop&curr=SAR&hl=ar&gl=sa"
 
 # ==========================================
 # 🧹 تطهير وأرشفة البيانات التاريخية
