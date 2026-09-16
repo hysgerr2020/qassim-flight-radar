@@ -464,11 +464,11 @@ def get_all_monitored_pairs(months_ahead=3):
 def parse_airline_name(text):
     t = text.lower()
     found = []
-    if "flyadeal" in t or "أديل" in t:
+    if any(w in t for w in ["flyadeal", "أديل", "f3"]):
         found.append("طيران أديل")
-    if "flynas" in t or "ناس" in t:
+    if any(w in t for w in ["flynas", "ناس", "xy"]):
         found.append("طيران ناس")
-    if "saudia" in t or "السعودية" in t:
+    if any(w in t for w in ["saudia", "السعودية", "saudi arabian", "sv"]):
         found.append("الخطوط السعودية")
 
     if len(found) > 1:
