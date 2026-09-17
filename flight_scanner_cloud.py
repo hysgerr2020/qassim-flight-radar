@@ -116,9 +116,10 @@ def build_google_flights_url(dep_clean, ret_clean="", trip_type="roundtrip"):
     destination = "ELQ" if trip_type == "oneway_in" else "JED"
 
     if trip_type in ["oneway_out", "oneway_in"] or not ret_clean:
-        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=ar&gl=sa"
     else:
-        return f"https://www.google.com/travel/flights?q=round-trip%20flights%20from%20{origin}%20to%20{destination}%20from%20{dep_clean}%20to%20{ret_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        # صيغة محكمة لضمان قفل البحث على الذهاب والعودة الصافية معاً
+        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20returning%20{ret_clean}%20nonstop&curr=SAR&hl=ar&gl=sa"
 
 # ==========================================
 # 🧹 تطهير وأرشفة البيانات التاريخية
@@ -464,12 +465,76 @@ def parse_airline_name(text):
         return found[0]
     return "رحلة مباشرة"
 
-def parse_flight_card_text(text, card_element=None):
-    """استخراج دقيق للوقت والسعر الفعلي لتذكرة المسار الواحد الصافي"""
-    norm_text = text.translate(AR_NUM_MAP)
+# ==============================================================================
+# 🎯 محرك استخراج بطاقات الطيران بالسعر الإجمالي المباشر الصافي
+# ==============================================================================
+def parse_flight_card_text(card_element):
+    """استخراج السعر الحقيقي والناقل والتوقيت بدقة 100% من بطاقة الرحلة"""
+    try:
+        raw_text = card_element.inner_text().translate(AR_NUM_MAP)
+    except Exception:
+        return None, "", "", ""
+
+    # 1. استخراج السعر الإجمالي الصافي من عنصر السعر الرسمي المباشر
+    price = None
+    price_selectors = [
+        ".YMlIz",
+        "div.FJP20b",
+        "span[aria-label*='ريال']",
+        "span[aria-label*='SAR']",
+        "span[aria-label*='Saudi Riyal']"
+    ]
+    
+    for sel in price_selectors:
+        try:
+            p_el = card_element.locator(sel).first
+            if p_el.count() > 0:
+                t = p_el.inner_text().translate(AR_NUM_MAP)
+                m = re.search(r'([\d,]+)', t.replace('\xa0', '').replace(' ', ''))
+                if m:
+                    val = int(m.group(1).replace(',', ''))
+                    if 150 <= val <= 5000:
+                        price = val
+                        break
+        except Exception:
+            continue
+
+    # 2. فحص aria-label الحاوي للسعر الإجمالي
+    if not price:
+        try:
+            aria_text = (card_element.get_attribute("aria-label") or "").translate(AR_NUM_MAP)
+            m_aria = re.search(r'(?:من\s*)?([\d,]+)\s*(?:ريال سعودي|SAR|Saudi Riyal|ريال)', aria_text)
+            if m_aria:
+                val = int(m_aria.group(1).replace(',', ''))
+                if 150 <= val <= 5000:
+                    price = val
+        except Exception:
+            pass
+
+    # 3. محاولة بديلة: قراءة السعر من النص المجاور لكلمة ريال/SAR واستبعاد الرسوم الصغرى
+    if not price:
+        cleaned = re.sub(r'\b\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?\b', '', raw_text)
+        cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|ساعة|ساعات|دقيقة|دقائق|kg|كجم|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
+        matches = re.findall(r'(?:sar|ر\.س|ريال)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال)', cleaned, re.IGNORECASE)
+        candidates = []
+        for m1, m2 in matches:
+            v = m1 if m1 else m2
+            try:
+                num = int(v.replace(',', ''))
+                if 200 <= num <= 5000:
+                    candidates.append(num)
+            except Exception:
+                continue
+        if candidates:
+            price = min(candidates)
+
+    if not price:
+        return None, "", "", ""
+
+    # استخراج توقيت الإقلاع
     time_ar = ""
     raw_time = ""
-    m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
+    m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', raw_text)
     if m_time:
         raw_time = m_time.group(1).strip()
         if re.search(r'[a-zA-Z]', raw_time):
@@ -478,48 +543,14 @@ def parse_flight_card_text(text, card_element=None):
             try:
                 parts = raw_time.split(":")
                 h = int(parts[0])
-                m = parts[1]
-                time_ar = f"{h if h == 12 else h - 12}:{m} م" if h >= 12 else f"{12 if h == 0 else h}:{m} ص"
+                m_min = parts[1]
+                time_ar = f"{h if h == 12 else h - 12}:{m_min} م" if h >= 12 else f"{12 if h == 0 else h}:{m_min} ص"
             except Exception:
                 time_ar = raw_time
         else:
             time_ar = raw_time
 
-    price = None
-
-    if card_element is not None:
-        try:
-            price_element = card_element.locator("[aria-label*='ريال'], [aria-label*='SAR'], span[role='text']").first
-            if price_element.count() > 0:
-                p_text = price_element.get_attribute("aria-label") or price_element.inner_text()
-                p_clean = p_text.translate(AR_NUM_MAP)
-                m = re.search(r'([\d,]+)\s*(?:ريال|SAR|ر\.س)', p_clean)
-                if m:
-                    price = int(m.group(1).replace(',', ''))
-        except Exception:
-            pass
-
-    if not price:
-        cleaned = re.sub(r'\b\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?\b', '', norm_text)
-        cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|ساعة|ساعات|دقيقة|دقائق|kg|كجم|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
-        matches = re.findall(r'([\d,]+)\s*(?:ريال|ر\.س|SAR)|(?:ريال|ر\.س|SAR)\s*([\d,]+)', cleaned, re.IGNORECASE)
-        found_prices = []
-        for m1, m2 in matches:
-            val = m1 or m2
-            if val:
-                try:
-                    num = int(val.replace(',', ''))
-                    if 120 <= num <= 4000:
-                        found_prices.append(num)
-                except Exception:
-                    continue
-        if found_prices:
-            price = min(found_prices)
-
-    if not price:
-        return None, "", "", ""
-
-    airline = parse_airline_name(norm_text)
+    airline = parse_airline_name(raw_text)
     return price, airline, time_ar, raw_time
 
 # ==========================================
@@ -527,7 +558,7 @@ def parse_flight_card_text(text, card_element=None):
 # ==========================================
 def analyze_price_prediction(cur_p, dep_date_str, prev_p=None, trip_type="roundtrip"):
     is_one_way = (trip_type in ["oneway_out", "oneway_in"])
-    floor_price = 179 if is_one_way else 358
+    floor_price = 179 if is_one_way else 338
     good_price = 240 if is_one_way else 498
     fair_price = 320 if is_one_way else 682
 
@@ -636,7 +667,7 @@ def generate_price_chart(items):
 
         plt.title('ELQ <-> JED Flight Price Trend (Direct Flights)', fontsize=14, fontweight='bold', pad=15, color='#0f172a')
         plt.xlabel('Departure Date (MM/DD)', fontsize=10, fontweight='bold', labelpad=10, color='#475569')
-        plt.ylabel('Total Price (SAR)', fontsize=10, fontweight='bold', labelpad=10, color='#475569')
+        plt.ylabel('Total Roundtrip Price (SAR)', fontsize=10, fontweight='bold', labelpad=10, color='#475569')
 
         plt.xticks(range(len(dates)), dates, rotation=55, fontsize=8, color='#334155')
         plt.yticks(fontsize=9, color='#334155')
@@ -741,7 +772,7 @@ def build_briefing_message(items):
         f"   🔍 <a href='{html_href(tp_flight_next)}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
         f"   🏨 <a href='{html_href(tp_hotel_next)}'>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</a>\n\n"
         f"🎒 <b>2. أرخص تذكرة خفيفة (بدون شحن):</b>\n"
-        f"   💰 <b>{ch_price} ر.س إجمالي</b> ({ch_type})\n"
+        f"   💰 <b>{ch_price} ر.س إجمالي ذهاب وعودة</b> ({ch_type})\n"
         f"   ✈️ {ch_airline}{t_cheap}\n"
         f"   🎯 <b>مؤشر الثقة:</b> <b>{cheapest_overall.get('مؤشر_الثقة', cheapest_overall.get('score', 95))}%</b>\n"
         f"   ✈️ <a href='{html_href(direct_cheap)}'>حجز تذكرة القاع مباشرة ↗</a>\n"
@@ -771,7 +802,7 @@ def intercept_route_resources(route):
 def create_stealth_context(browser):
     profile = random.choice(REALISTIC_PROFILES)
     context = browser.new_context(
-        locale="en-US",
+        locale="ar-SA",
         timezone_id="Asia/Riyadh",
         user_agent=profile["ua"],
         viewport=profile["viewport"],
@@ -779,7 +810,7 @@ def create_stealth_context(browser):
         is_mobile=False,
         has_touch=False,
         extra_http_headers={
-            "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+            "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8",
             "sec-ch-ua": '"Chromium";v="129", "Not=A?Brand";v="24", "Google Chrome";v="129"',
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": f'"{profile["platform"]}"',
@@ -795,7 +826,7 @@ def create_stealth_context(browser):
     stealth_js = f"""
     Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
     window.chrome = {{ runtime: {{}} }};
-    Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en', 'ar-SA', 'ar'] }});
+    Object.defineProperty(navigator, 'languages', {{ get: () => ['ar-SA', 'ar', 'en-US', 'en'] }});
     const getParameter = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function(parameter) {{
         if (parameter === 37445) return '{profile["vendor"]}';
@@ -808,142 +839,132 @@ def create_stealth_context(browser):
     return context
 
 # ==========================================
-# ⚡ محرك فحص المسار الفردي الصافي (Leg Scraper)
-# ==========================================
-def scrape_single_leg(page, origin, destination, date_str):
-    """استخراج الرحلات المباشرة لمسار محدد وتاريخ معين بدقة مطلقة"""
-    clean_d = clean_date_str(date_str)
-    url = f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{clean_d}%20nonstop&curr=SAR&hl=en&gl=sa"
-    
-    flights = []
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=20000)
-        if "consent.google" in page.url:
-            try:
-                page.locator('button:has-text("Accept all"), button:has-text("I agree"), button:has-text("Reject all")').first.click(timeout=3000)
-                page.wait_for_load_state("domcontentloaded", timeout=4000)
-            except Exception:
-                pass
-
-        page.mouse.wheel(0, random.randint(120, 250))
-        try:
-            page.wait_for_selector("li.pIav2d, div.pIav2d, [role='listitem']", timeout=8000)
-        except Exception:
-            time.sleep(1.2)
-
-        cards = page.locator("li.pIav2d, div.pIav2d, [role='listitem']").all()
-        for c in cards:
-            try:
-                txt = c.inner_text()
-                txt_l = txt.lower()
-                has_nonstop = any(w in txt_l for w in ["nonstop", "non-stop", "direct"]) or any(w in txt for w in ["مباشر", "بدون توقف", "مباشرة"])
-                has_stop = any(w in txt_l for w in ["1 stop", "2 stop"]) or any(w in txt for w in ["غير مباشر", "توقف واحد"])
-
-                if has_nonstop and not has_stop:
-                    price, airline, time_ar, raw_time = parse_flight_card_text(txt, card_element=c)
-                    if price:
-                        flights.append({
-                            "price": int(price),
-                            "airline": airline,
-                            "time_ar": time_ar,
-                            "raw_time": raw_time
-                        })
-            except Exception:
-                continue
-    except Exception as e:
-        print(f"⚠️ تعذر جلب مسار {origin}->{destination} لتاريخ {clean_d}: {e}")
-
-    return flights
-
-# ==========================================
 # 🎯 فحص المسار المخصص اللحظي
 # ==========================================
 def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
     dep_clean = clean_date_str(dep)
     ret_clean = clean_date_str(ret)
-    
+
+    if trip_type == "oneway_out":
+        title_head = "🛫 رحلة ذهاب فقط (القصيم ⬅ جدة)"
+    elif trip_type == "oneway_in":
+        title_head = "🛬 رحلة عودة فقط (جدة ⬅ القصيم)"
+    else:
+        title_head = "🔄 رحلة ذهاب وعودة (القصيم ⇄ جدة)"
+
+    url = build_google_flights_url(dep_clean, ret_clean, trip_type)
+    print(f"🎯 بدء الفحص المخصص للمسار [{title_head}]: الذهاب {dep_clean} | العودة {ret_clean}")
+    available_flights = []
+
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-infobars",
+                "--disable-gpu",
+                "--no-zygote"
+            ]
         )
         try:
             context = create_stealth_context(browser)
             page = context.new_page()
             page.route("**/*", intercept_route_resources)
 
-            if trip_type == "oneway_out":
-                title_head = "🛫 رحلة ذهاب فقط (القصيم ⬅ جدة)"
-                flights = scrape_single_leg(page, "ELQ", "JED", dep_clean)
-                if not flights:
-                    send_telegram_msg(f"⚠️ لم يتم العثور على رحلات مباشرة لـ {dep_clean}", high_priority=True)
-                    return
-                flights.sort(key=lambda x: x["price"])
-                ch = flights[0]
-                pred = analyze_price_prediction(ch["price"], dep_clean, trip_type="oneway_out")
-                lines = [
-                    f"🎯 <b>نتيجة الفحص الفوري:</b>\n🧭 {title_head}\n📅 <code>{dep_clean}</code>\n",
-                    f"💰 <b>السعر الصافي:</b> <b>{ch['price']} ر.س</b> — ✈️ {ch['airline']} (⏰ {ch['time_ar']})\n",
-                    f"🎯 مؤشر الثقة: {pred['score']}% ({pred['recommendation']})\n"
-                ]
-                send_telegram_msg("\n".join(lines), high_priority=True)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=22000)
+                if "consent.google" in page.url:
+                    try:
+                        page.locator('button:has-text("Accept all"), button:has-text("I agree"), button:has-text("قبول الكل"), button:has-text("موافق")').first.click(timeout=3000)
+                        page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except Exception:
+                        pass
 
-            elif trip_type == "oneway_in":
-                title_head = "🛬 رحلة عودة فقط (جدة ⬅ القصيم)"
-                flights = scrape_single_leg(page, "JED", "ELQ", dep_clean)
-                if not flights:
-                    send_telegram_msg(f"⚠️ لم يتم العثور على رحلات مباشرة لـ {dep_clean}", high_priority=True)
-                    return
-                flights.sort(key=lambda x: x["price"])
-                ch = flights[0]
-                pred = analyze_price_prediction(ch["price"], dep_clean, trip_type="oneway_in")
-                lines = [
-                    f"🎯 <b>نتيجة الفحص الفوري:</b>\n🧭 {title_head}\n📅 <code>{dep_clean}</code>\n",
-                    f"💰 <b>السعر الصافي:</b> <b>{ch['price']} ر.س</b> — ✈️ {ch['airline']} (⏰ {ch['time_ar']})\n",
-                    f"🎯 مؤشر الثقة: {pred['score']}% ({pred['recommendation']})\n"
-                ]
-                send_telegram_msg("\n".join(lines), high_priority=True)
+                page.mouse.wheel(0, random.randint(150, 300))
+                try:
+                    page.wait_for_selector("li.pIav2d, div.pIav2d, [role='listitem']", timeout=10000)
+                except Exception:
+                    time.sleep(2)
 
-            else:
-                title_head = "🔄 رحلة ذهاب وعودة (القصيم ⇄ جدة)"
-                outbound = scrape_single_leg(page, "ELQ", "JED", dep_clean)
-                inbound = scrape_single_leg(page, "JED", "ELQ", ret_clean)
+                cards = page.locator("li.pIav2d, div.pIav2d, [role='listitem']").all()
+                for c in cards:
+                    try:
+                        txt = c.inner_text()
+                        txt_l = txt.lower()
+                        has_nonstop = any(w in txt_l for w in ["nonstop", "non-stop", "direct"]) or any(w in txt for w in ["مباشر", "بدون توقف", "مباشرة"])
+                        has_stop = any(w in txt_l for w in ["1 stop", "2 stop"]) or any(w in txt for w in ["غير مباشر", "توقف واحد"])
 
-                if not outbound or not inbound:
-                    send_telegram_msg(f"⚠️ تعذر العثور على رحلات مباشرة في كلا الاتجاهين للموعد <code>{dep_clean}</code> ⬅ <code>{ret_clean}</code>", high_priority=True)
-                    return
-
-                outbound.sort(key=lambda x: x["price"])
-                inbound.sort(key=lambda x: x["price"])
-                b_out = outbound[0]
-                b_in = inbound[0]
-
-                total_p = b_out["price"] + b_in["price"]
-                air = b_out["airline"] if b_out["airline"] == b_in["airline"] else f"{b_out['airline']} + {b_in['airline']} (دمج ذكي 🔀)"
-                pred = analyze_price_prediction(total_p, dep_clean, trip_type="roundtrip")
-
-                dir_link = get_direct_booking_link(air, dep_clean, ret_clean, "roundtrip")
-                tp_flight = get_affiliate_flight_link(dep_clean, ret_clean, "roundtrip")
-                tp_hotel = get_affiliate_hotel_link(dep_clean, ret_clean)
-
-                lines = [
-                    f"🎯 <b>نتيجة الفحص الحقيقي للذهاب والعودة:</b>\n",
-                    f"🧭 <b>المسار:</b> {title_head}",
-                    f"🛫 الذهاب: <code>{dep_clean}</code> (⏰ {b_out['time_ar']}) — <b>{b_out['price']} ر.س</b> ({b_out['airline']})",
-                    f"🛬 العودة: <code>{ret_clean}</code> (⏰ {b_in['time_ar']}) — <b>{b_in['price']} ر.س</b> ({b_in['airline']})\n",
-                    f"💰 <b>السعر الإجمالي الصافي:</b> <b>{total_p} ر.س ذهاب وعودة</b>",
-                    f"✈️ <b>الناقل المعتمد:</b> {air}",
-                    f"🎯 <b>مؤشر الثقة:</b> <b>{pred['score']}%</b> ({pred['recommendation']})\n",
-                    f"🔗 <a href='{html_href(dir_link)}'>حجز مباشر للرحلة ↗</a>",
-                    f"🔍 <a href='{html_href(tp_flight)}'>مقارنة بدائل التذاكر ↗</a>",
-                    f"🏨 <a href='{html_href(tp_hotel)}'>عروض فنادق جدة ↗</a>"
-                ]
-                send_telegram_msg("\n".join(lines), high_priority=True)
+                        if has_nonstop and not has_stop:
+                            price, airline, time_ar, raw_time = parse_flight_card_text(c)
+                            if price:
+                                available_flights.append({
+                                    "price": int(price),
+                                    "airline": airline,
+                                    "time_ar": time_ar,
+                                    "raw_time": raw_time
+                                })
+                    except Exception:
+                        continue
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء الفحص المخصص: {e}")
         finally:
             browser.close()
 
+    if not available_flights:
+        send_telegram_msg(
+            f"🔍 <b>تقرير فحص {title_head}</b>\n\n"
+            f"📅 التاريخ: <code>{dep_clean}</code>" + (f" ⬅ <code>{ret_clean}</code>" if ret_clean else "") + "\n\n"
+            f"⚠️ لم يتم العثور على رحلات مباشرة متوفرة في هذا التوقيت أو نفدت المقاعد.\n\n"
+            f"🔗 <a href='{html_href(url)}'>فحص الرحلات والبدائل المتاحة على Google Flights ↗</a>",
+            high_priority=True
+        )
+        return
+
+    available_flights.sort(key=lambda x: int(x["price"]))
+    cheapest = available_flights[0]
+    pred = analyze_price_prediction(cheapest["price"], dep_clean, trip_type=trip_type)
+
+    date_display = f"<code>{dep_clean}</code>" + (f" ⬅ <code>{ret_clean}</code>" if ret_clean else "")
+    lines = [
+        f"🎯 <b>نتيجة الفحص الفوري المباشر:</b>\n",
+        f"🧭 <b>المسار:</b> {title_head}",
+        f"📅 <b>تاريخ السفر:</b> {date_display}\n",
+        f"🏆 <b>أفضل خيار متاح:</b>",
+        f"   💰 <b>{cheapest['price']} ر.س إجمالي ذهاب وعودة</b> — ✈️ {cheapest['airline']} (⏰ {cheapest['time_ar']})",
+        f"   🎯 <b>مؤشر الثقة في الشراء:</b> <b>{pred['score']}%</b> ({pred['recommendation']})\n",
+        f"📋 <b>كافة الخيارات المباشرة:</b>"
+    ]
+
+    seen = set()
+    tp_flight_probe = get_affiliate_flight_link(dep_clean, ret_clean, trip_type)
+    tp_hotel_probe = get_affiliate_hotel_link(dep_clean, ret_clean)
+    is_one_way_mode = (trip_type in ["oneway_out", "oneway_in"])
+
+    for f in available_flights:
+        air = f["airline"]
+        if air not in seen:
+            seen.add(air)
+            bag_fee = get_baggage_fee(air, is_one_way=is_one_way_mode)
+            bag_txt = " (شحن 23kg مجاناً 🎁)" if "السعودية" in air else f" (+{bag_fee} حقيبة)"
+            dir_link = get_direct_booking_link(air, dep_clean, ret_clean, trip_type)
+            action_label = "حجز مباشر عبر محرك المقارنة ↗" if "دمج ذكي" in air else f"حجز مباشر من موقع {air} ↗"
+            lines.append(
+                f"• <b>{f['price']} ر.س</b> — ✈️ {air}{bag_txt} (⏰ {f['time_ar']})\n"
+                f"   🔗 <a href='{html_href(dir_link)}'>{action_label}</a>"
+            )
+
+    cal_link = get_google_calendar_link(title_head, cheapest["airline"], dep_clean, ret_clean, cheapest["price"], url)
+    lines.append(f"\n🔍 <a href='{html_href(tp_flight_probe)}'><b>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</b></a>")
+    lines.append(f"🏨 <a href='{html_href(tp_hotel_probe)}'><b>أفضل عروض فنادق وشقق جدة لنفس الفترة ↗</b></a>")
+    lines.append(f"📅 <a href='{html_href(cal_link)}'>إضافة موعد الرحلة لتقويم Google ↗</a>")
+
+    send_telegram_msg("\n".join(lines), high_priority=True)
+    print("✅ تم إرسال تقرير المسار المخصص للتيليجرام بنجاح!")
+
 # ==========================================
-# ☁️ دورة الفحص السحابي الشاملة (المحرك الثنائي)
+# ☁️ دورة الفحص السحابي الشاملة لرحلات الذهاب والعودة
 # ==========================================
 def run_cloud_scan():
     if CUSTOM_DEP:
@@ -951,25 +972,25 @@ def run_cloud_scan():
         return
 
     start_time = time.time()
-    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان الحقيقي (المحرك الثنائي المتطابق)...")
+    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان الحقيقي (فحص الذهاب والعودة المباشر)...")
     pairs = get_all_monitored_pairs(months_ahead=3)
     results = []
     hist_state = load_history()
     price_history = hist_state.get("prices", {})
     alert_history = hist_state.get("alerts", {})
 
-    # استخراج التواريخ الفردية لكل اتجاه لمنع تكرار الفحص
-    unique_out_dates = sorted(list(set(clean_date_str(p[0]) for p in pairs)))
-    unique_in_dates = sorted(list(set(clean_date_str(p[1]) for p in pairs)))
-
-    outbound_db = {}
-    inbound_db = {}
-
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-infobars",
+                    "--disable-gpu",
+                    "--no-zygote"
+                ]
             )
 
             try:
@@ -977,35 +998,120 @@ def run_cloud_scan():
                 page = context.new_page()
                 page.route("**/*", intercept_route_resources)
 
-                # 1. رصد رحلات الذهاب الصافية (القصيم ⬅ جدة)
-                print(f"🛫 جاري مسح رحلات الذهاب ({len(unique_out_dates)} موعد)...")
-                for i, d in enumerate(unique_out_dates, 1):
-                    if i % 10 == 0:
-                        page.close()
-                        context.close()
+                for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
+                    dep_clean = clean_date_str(dep)
+                    ret_clean = clean_date_str(ret)
+
+                    # تدوير بصمة التصفح كل 12 رحلة لتفادي الرصد
+                    if idx % 12 == 0:
+                        try:
+                            page.close()
+                            context.close()
+                        except Exception:
+                            pass
                         context = create_stealth_context(browser)
                         page = context.new_page()
                         page.route("**/*", intercept_route_resources)
-
-                    res = scrape_single_leg(page, "ELQ", "JED", d)
-                    if res:
-                        outbound_db[d] = res
-                    time.sleep(random.uniform(0.8, 1.4))
-
-                # 2. رصد رحلات العودة الصافية (جدة ⬅ القصيم)
-                print(f"🛬 جاري مسح رحلات العودة ({len(unique_in_dates)} موعد)...")
-                for i, d in enumerate(unique_in_dates, 1):
-                    if i % 10 == 0:
-                        page.close()
-                        context.close()
-                        context = create_stealth_context(browser)
+                    elif idx % 6 == 0 or page.is_closed():
+                        try:
+                            if not page.is_closed():
+                                page.close()
+                        except Exception:
+                            pass
                         page = context.new_page()
                         page.route("**/*", intercept_route_resources)
 
-                    res = scrape_single_leg(page, "JED", "ELQ", d)
-                    if res:
-                        inbound_db[d] = res
-                    time.sleep(random.uniform(0.8, 1.4))
+                    url = build_google_flights_url(dep_clean, ret_clean, "roundtrip")
+                    cheapest_flight = None
+
+                    for attempt in range(3):
+                        try:
+                            if attempt > 0 or page.is_closed():
+                                try:
+                                    if not page.is_closed():
+                                        page.close()
+                                except Exception:
+                                    pass
+                                page = context.new_page()
+                                page.route("**/*", intercept_route_resources)
+
+                            page.goto(url, wait_until="domcontentloaded", timeout=18000)
+
+                            if "consent.google" in page.url:
+                                try:
+                                    page.locator('button:has-text("Accept all"), button:has-text("I agree"), button:has-text("قبول الكل"), button:has-text("موافق")').first.click(timeout=3000)
+                                    page.wait_for_load_state("domcontentloaded", timeout=4000)
+                                except Exception:
+                                    pass
+
+                            page.mouse.wheel(0, random.randint(100, 250))
+
+                            try:
+                                page.wait_for_selector("li.pIav2d, div.pIav2d, [role='listitem']", timeout=9000)
+                            except Exception:
+                                time.sleep(1.2)
+
+                            cards = page.locator("li.pIav2d, div.pIav2d, [role='listitem']").all()
+                            nonstop_options = []
+
+                            for c in cards:
+                                try:
+                                    txt = c.inner_text()
+                                    txt_l = txt.lower()
+                                    has_nonstop = any(w in txt_l for w in ["nonstop", "non-stop", "direct"]) or any(w in txt for w in ["مباشر", "بدون توقف", "مباشرة"])
+                                    has_stop = any(w in txt_l for w in ["1 stop", "2 stop"]) or any(w in txt for w in ["غير مباشر", "توقف واحد"])
+
+                                    if has_nonstop and not has_stop:
+                                        price, airline, time_ar, raw_time = parse_flight_card_text(c)
+                                        if price:
+                                            nonstop_options.append({
+                                                "price": int(price),
+                                                "airline": airline,
+                                                "time_ar": time_ar,
+                                                "raw_time": raw_time
+                                            })
+                                except Exception:
+                                    continue
+
+                            if nonstop_options:
+                                if "جمعة إلى سبت" in trip_type:
+                                    pm_options = [o for o in nonstop_options if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
+                                    cheapest_flight = min(pm_options, key=lambda x: int(x["price"])) if pm_options else min(nonstop_options, key=lambda x: int(x["price"]))
+                                else:
+                                    cheapest_flight = min(nonstop_options, key=lambda x: int(x["price"]))
+                                break
+
+                        except Exception:
+                            time.sleep((2 ** attempt) + random.uniform(0.5, 1.0))
+
+                    if cheapest_flight:
+                        cur_p = int(cheapest_flight["price"])
+                        air = cheapest_flight["airline"]
+                        f_time = cheapest_flight["time_ar"]
+                        flight_key = f"{dep_clean}_{ret_clean}"
+                        print(f"[{idx}/{len(pairs)}] ✅ رصد ذهاب وعودة حقيقي: {trip_type} -> {cur_p} ر.س ({air}) [⏰ {f_time}]")
+
+                        prev_p = int(price_history[flight_key]) if flight_key in price_history and str(price_history[flight_key]).isdigit() else None
+                        pred = analyze_price_prediction(cur_p, dep_clean, prev_p, "roundtrip")
+
+                        price_history[flight_key] = cur_p
+                        results.append({
+                            "نوع العطلة": trip_type,
+                            "تاريخ الذهاب": dep_clean,
+                            "وقت الإقلاع": f_time,
+                            "تاريخ العودة": ret_clean,
+                            "الناقل": air,
+                            "السعر": cur_p,
+                            "الرابط": url,
+                            "مؤشر_الثقة": pred["score"],
+                            "توصية_القرار": pred["recommendation"],
+                            "توقعات_7_أيام": pred["forecast"],
+                            "مستوى_الثقة": pred["level"]
+                        })
+                    else:
+                        print(f"[{idx}/{len(pairs)}] ⚠️ لا توجد رحلات مباشرة متوفرة في موعد [{dep_clean}].")
+
+                    time.sleep(random.uniform(1.0, 1.8))
 
             finally:
                 browser.close()
@@ -1014,58 +1120,6 @@ def run_cloud_scan():
         print(f"❌ خطأ جسيم في تشغيل المتصفح: {fatal_e}")
         send_telegram_msg(f"⚠️🚨 <b>عطل طارئ:</b> <code>{fatal_e}</code>", high_priority=True)
         raise fatal_e
-
-    # 3. دمج الرحلات وحساب الأسعار التراكمية الحقيقية لكل إجازة
-    for idx, (dep, ret, trip_type) in enumerate(pairs, 1):
-        dep_clean = clean_date_str(dep)
-        ret_clean = clean_date_str(ret)
-
-        out_list = outbound_db.get(dep_clean, [])
-        in_list = inbound_db.get(ret_clean, [])
-
-        if not out_list or not in_list:
-            print(f"[{idx}/{len(pairs)}] ⚠️ لا تتوفر مقاعد مباشرة في الاتجاهين للموعد [{dep_clean} ⬅ {ret_clean}].")
-            continue
-
-        # تحديد أفضل رحلة ذهاب وعودة مع مراعاة رحلات الجمعة المسائية
-        if "جمعة إلى سبت" in trip_type:
-            pm_out = [o for o in out_list if "PM" in o["raw_time"].upper() or "م" in o["time_ar"]]
-            best_out = min(pm_out, key=lambda x: x["price"]) if pm_out else min(out_list, key=lambda x: x["price"])
-        else:
-            best_out = min(out_list, key=lambda x: x["price"])
-
-        best_in = min(in_list, key=lambda x: x["price"])
-
-        # السعر الحقيقي المطابق للواقع
-        cur_p = int(best_out["price"] + best_in["price"])
-        f_time = best_out["time_ar"]
-
-        if best_out["airline"] == best_in["airline"]:
-            air = best_out["airline"]
-        else:
-            air = f"{best_out['airline']} + {best_in['airline']} (دمج ذكي 🔀)"
-
-        flight_key = f"{dep_clean}_{ret_clean}"
-        print(f"[{idx}/{len(pairs)}] ✅ رصد حقيقي مؤكد: {trip_type} -> {cur_p} ر.س ({air}) [ذهاب: {best_out['price']} + عودة: {best_in['price']}]")
-
-        prev_p = int(price_history[flight_key]) if flight_key in price_history and str(price_history[flight_key]).isdigit() else None
-        pred = analyze_price_prediction(cur_p, dep_clean, prev_p, "roundtrip")
-        url = build_google_flights_url(dep_clean, ret_clean, "roundtrip")
-
-        price_history[flight_key] = cur_p
-        results.append({
-            "نوع العطلة": trip_type,
-            "تاريخ الذهاب": dep_clean,
-            "وقت الإقلاع": f_time,
-            "تاريخ العودة": ret_clean,
-            "الناقل": air,
-            "السعر": cur_p,
-            "الرابط": url,
-            "مؤشر_الثقة": pred["score"],
-            "توصية_القرار": pred["recommendation"],
-            "توقعات_7_أيام": pred["forecast"],
-            "مستوى_الثقة": pred["level"]
-        })
 
     duration = round(time.time() - start_time, 1)
     hist_state["prices"] = price_history
@@ -1080,7 +1134,7 @@ def run_cloud_scan():
                     old_data = json.load(f)
                     results = old_data.get("flights", [])
             except Exception as e:
-                print(f"⚠️ خطأ استرجاع: {e}")
+                print(f"⚠️ خطأ أثناء استرجاع البيانات: {e}")
 
     if results:
         results = sorted(results, key=lambda x: int(x.get("السعر", x.get("price", 0))))
@@ -1134,10 +1188,13 @@ def run_cloud_scan():
             )
             top_blocks.append(block)
 
-        header_title = "✅ <b>اكتمل الفحص ومقارنة عروض الذهاب والعودة الصافية!</b>\n"
+        header_title = "✅ <b>اكتمل الفحص ومقارنة عروض الذهاب والعودة الفعلية بنجاح!</b>\n"
         send_telegram_long_message(top_blocks, header=header_title)
+
         df.to_excel(EXCEL_FILE, index=False)
-        print(f"✅ اكتملت الدورة السحابية بنجاح في {duration} ثانية! تم احتساب {len(results)} رحلة ذهاب وعودة متطابقة بالهللة.")
+        print(f"✅ اكتملت الدورة السحابية بنجاح في {duration} ثانية! تم احتساب {len(results)} رحلة ذهاب وعودة حقيقية.")
+    else:
+        send_telegram_msg("⚠️🚨 تحذير: تعذر الوصول إلى نتائج الفحص ولم يتوفر أرشيف احتياطي!", high_priority=True)
 
 if __name__ == "__main__":
     run_cloud_scan()
