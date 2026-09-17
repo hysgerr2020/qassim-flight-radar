@@ -112,14 +112,14 @@ REALISTIC_PROFILES = [
 ]
 
 def build_google_flights_url(dep_clean, ret_clean="", trip_type="roundtrip"):
+    """رابط قياسي صريح يفرض على جوجل جلب حزمة الذهاب والعودة الصافية معاً"""
     origin = "JED" if trip_type == "oneway_in" else "ELQ"
     destination = "ELQ" if trip_type == "oneway_in" else "JED"
 
     if trip_type in ["oneway_out", "oneway_in"] or not ret_clean:
-        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=ar&gl=sa"
+        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
     else:
-        # صيغة محكمة لضمان قفل البحث على الذهاب والعودة الصافية معاً
-        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20returning%20{ret_clean}%20nonstop&curr=SAR&hl=ar&gl=sa"
+        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20round%20trip%20{dep_clean}%20to%20{ret_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
 
 # ==========================================
 # 🧹 تطهير وأرشفة البيانات التاريخية
@@ -466,80 +466,78 @@ def parse_airline_name(text):
     return "رحلة مباشرة"
 
 # ==============================================================================
-# 🎯 محرك استخراج بطاقات الطيران بالسعر الإجمالي المباشر الصافي
+# 🎯 محرك استخراج السعر الحقيقي المطابق للواقع
 # ==============================================================================
 def parse_flight_card_text(card_element):
-    """استخراج السعر الحقيقي والناقل والتوقيت بدقة 100% من بطاقة الرحلة"""
     try:
-        raw_text = card_element.inner_text().translate(AR_NUM_MAP)
+        raw_text = card_element.inner_text()
     except Exception:
         return None, "", "", ""
 
-    # 1. استخراج السعر الإجمالي الصافي من عنصر السعر الرسمي المباشر
+    norm_text = raw_text.translate(AR_NUM_MAP)
     price = None
-    price_selectors = [
-        ".YMlIz",
-        "div.FJP20b",
-        "span[aria-label*='ريال']",
-        "span[aria-label*='SAR']",
-        "span[aria-label*='Saudi Riyal']"
-    ]
-    
-    for sel in price_selectors:
-        try:
-            p_el = card_element.locator(sel).first
-            if p_el.count() > 0:
-                t = p_el.inner_text().translate(AR_NUM_MAP)
-                m = re.search(r'([\d,]+)', t.replace('\xa0', '').replace(' ', ''))
+
+    # الاستخراج المباشر من خصائص السعر الرسمية
+    try:
+        aria_candidates = [
+            card_element.get_attribute("aria-label") or "",
+            card_element.locator("[aria-label*='SAR'], [aria-label*='Saudi Riyal'], [aria-label*='ريال']").first.get_attribute("aria-label") or ""
+        ]
+        for a_text in aria_candidates:
+            if a_text:
+                m = re.search(r'([\d,]+)\s*(?:Saudi Riyals|SAR|ريال)', a_text.replace('\xa0', ''))
                 if m:
                     val = int(m.group(1).replace(',', ''))
-                    if 150 <= val <= 5000:
+                    if 120 <= val <= 5000:
                         price = val
                         break
-        except Exception:
-            continue
+    except Exception:
+        pass
 
-    # 2. فحص aria-label الحاوي للسعر الإجمالي
     if not price:
-        try:
-            aria_text = (card_element.get_attribute("aria-label") or "").translate(AR_NUM_MAP)
-            m_aria = re.search(r'(?:من\s*)?([\d,]+)\s*(?:ريال سعودي|SAR|Saudi Riyal|ريال)', aria_text)
-            if m_aria:
-                val = int(m_aria.group(1).replace(',', ''))
-                if 150 <= val <= 5000:
-                    price = val
-        except Exception:
-            pass
+        for sel in [".YMlIz", "div.FJP20b", "span[data-gs]", ".GARawf"]:
+            try:
+                p_el = card_element.locator(sel).first
+                if p_el.count() > 0:
+                    t = p_el.inner_text()
+                    m = re.search(r'([\d,]+)', t.replace('\xa0', '').replace(' ', ''))
+                    if m:
+                        val = int(m.group(1).replace(',', ''))
+                        if 120 <= val <= 5000:
+                            price = val
+                            break
+            except Exception:
+                continue
 
-    # 3. محاولة بديلة: قراءة السعر من النص المجاور لكلمة ريال/SAR واستبعاد الرسوم الصغرى
     if not price:
-        cleaned = re.sub(r'\b\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?\b', '', raw_text)
-        cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|ساعة|ساعات|دقيقة|دقائق|kg|كجم|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
-        matches = re.findall(r'(?:sar|ر\.س|ريال)\s*([\d,]+)|([\d,]+)\s*(?:sar|ر\.س|ريال)', cleaned, re.IGNORECASE)
+        cleaned = re.sub(r'\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b', '', norm_text)
+        cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|kg|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
+        matches = re.findall(r'(?:SAR|SR)\s*([\d,]+)|([\d,]+)\s*(?:SAR|SR)', cleaned, re.IGNORECASE)
         candidates = []
         for m1, m2 in matches:
             v = m1 if m1 else m2
-            try:
-                num = int(v.replace(',', ''))
-                if 200 <= num <= 5000:
-                    candidates.append(num)
-            except Exception:
-                continue
+            if v:
+                try:
+                    num = int(v.replace(',', ''))
+                    if 120 <= num <= 5000:
+                        candidates.append(num)
+                except Exception:
+                    continue
         if candidates:
             price = min(candidates)
 
     if not price:
         return None, "", "", ""
 
-    # استخراج توقيت الإقلاع
+    # استخراج وقت الإقلاع
     time_ar = ""
     raw_time = ""
-    m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm|ص|م))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', raw_text)
+    m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
     if m_time:
         raw_time = m_time.group(1).strip()
         if re.search(r'[a-zA-Z]', raw_time):
             time_ar = raw_time.replace("AM", "ص").replace("PM", "م").replace("am", "ص").replace("pm", "م")
-        elif "ص" not in raw_time and "م" not in raw_time:
+        else:
             try:
                 parts = raw_time.split(":")
                 h = int(parts[0])
@@ -547,10 +545,8 @@ def parse_flight_card_text(card_element):
                 time_ar = f"{h if h == 12 else h - 12}:{m_min} م" if h >= 12 else f"{12 if h == 0 else h}:{m_min} ص"
             except Exception:
                 time_ar = raw_time
-        else:
-            time_ar = raw_time
 
-    airline = parse_airline_name(raw_text)
+    airline = parse_airline_name(norm_text)
     return price, airline, time_ar, raw_time
 
 # ==========================================
@@ -802,7 +798,7 @@ def intercept_route_resources(route):
 def create_stealth_context(browser):
     profile = random.choice(REALISTIC_PROFILES)
     context = browser.new_context(
-        locale="ar-SA",
+        locale="en-US",
         timezone_id="Asia/Riyadh",
         user_agent=profile["ua"],
         viewport=profile["viewport"],
@@ -810,7 +806,7 @@ def create_stealth_context(browser):
         is_mobile=False,
         has_touch=False,
         extra_http_headers={
-            "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
             "sec-ch-ua": '"Chromium";v="129", "Not=A?Brand";v="24", "Google Chrome";v="129"',
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": f'"{profile["platform"]}"',
@@ -826,7 +822,7 @@ def create_stealth_context(browser):
     stealth_js = f"""
     Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
     window.chrome = {{ runtime: {{}} }};
-    Object.defineProperty(navigator, 'languages', {{ get: () => ['ar-SA', 'ar', 'en-US', 'en'] }});
+    Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en', 'ar-SA', 'ar'] }});
     const getParameter = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function(parameter) {{
         if (parameter === 37445) return '{profile["vendor"]}';
@@ -877,7 +873,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
                 page.goto(url, wait_until="domcontentloaded", timeout=22000)
                 if "consent.google" in page.url:
                     try:
-                        page.locator('button:has-text("Accept all"), button:has-text("I agree"), button:has-text("قبول الكل"), button:has-text("موافق")').first.click(timeout=3000)
+                        page.locator('button:has-text("Accept all"), button:has-text("I agree"), button:has-text("Reject all")').first.click(timeout=3000)
                         page.wait_for_load_state("domcontentloaded", timeout=5000)
                     except Exception:
                         pass
@@ -964,7 +960,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
     print("✅ تم إرسال تقرير المسار المخصص للتيليجرام بنجاح!")
 
 # ==========================================
-# ☁️ دورة الفحص السحابي الشاملة لرحلات الذهاب والعودة
+# ☁️ دورة الفحص السحابي الشاملة
 # ==========================================
 def run_cloud_scan():
     if CUSTOM_DEP:
@@ -972,7 +968,7 @@ def run_cloud_scan():
         return
 
     start_time = time.time()
-    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان الحقيقي (فحص الذهاب والعودة المباشر)...")
+    print("☁️ بدء تشغيل الرادار السحابي وصائد القيعان الحقيقي (فحص الذهاب والعودة الصافي المباشر)...")
     pairs = get_all_monitored_pairs(months_ahead=3)
     results = []
     hist_state = load_history()
@@ -1035,21 +1031,21 @@ def run_cloud_scan():
                                 page = context.new_page()
                                 page.route("**/*", intercept_route_resources)
 
-                            page.goto(url, wait_until="domcontentloaded", timeout=18000)
+                            page.goto(url, wait_until="domcontentloaded", timeout=20000)
 
                             if "consent.google" in page.url:
                                 try:
-                                    page.locator('button:has-text("Accept all"), button:has-text("I agree"), button:has-text("قبول الكل"), button:has-text("موافق")').first.click(timeout=3000)
+                                    page.locator('button:has-text("Accept all"), button:has-text("I agree"), button:has-text("Reject all")').first.click(timeout=3000)
                                     page.wait_for_load_state("domcontentloaded", timeout=4000)
                                 except Exception:
                                     pass
 
-                            page.mouse.wheel(0, random.randint(100, 250))
+                            page.mouse.wheel(0, random.randint(120, 250))
 
                             try:
                                 page.wait_for_selector("li.pIav2d, div.pIav2d, [role='listitem']", timeout=9000)
                             except Exception:
-                                time.sleep(1.2)
+                                time.sleep(1.5)
 
                             cards = page.locator("li.pIav2d, div.pIav2d, [role='listitem']").all()
                             nonstop_options = []
@@ -1188,7 +1184,7 @@ def run_cloud_scan():
             )
             top_blocks.append(block)
 
-        header_title = "✅ <b>اكتمل الفحص ومقارنة عروض الذهاب والعودة الفعلية بنجاح!</b>\n"
+        header_title = "✅ <b>اكتمل الفحص ومقارنة عروض الذهاب والعودة الصافية!</b>\n"
         send_telegram_long_message(top_blocks, header=header_title)
 
         df.to_excel(EXCEL_FILE, index=False)
