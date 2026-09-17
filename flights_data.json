@@ -1,13 +1,13 @@
 {
-  "updated_at": "2026-09-17 02:55 AM",
-  "raw_timestamp": 1789602915,
+  "updated_at": "2026-09-17 03:00 AM",
+  "raw_timestamp": 1789603243,
   "stats": {
     "total": 31,
     "min_price": 470,
     "avg_price": 704,
     "carriers": [
-      "طيران ناس",
-      "طيران أديل"
+      "طيران أديل",
+      "طيران ناس"
     ]
   },
   "flights": [
