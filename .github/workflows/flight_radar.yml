@@ -43,24 +43,11 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: فحص ذاكرة التخزين المؤقت لمتصفح Playwright
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('**/flight_scanner_cloud.py') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-chromium-
-
-- name: تثبيت المكتبات والمتصفح السحابي
+      - name: تثبيت المكتبات والمتصفح السحابي
         run: |
           python -m pip install --upgrade pip
           pip install playwright pandas openpyxl matplotlib
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" != "true" ]; then
-            playwright install --with-deps chromium
-          else
-            playwright install-deps chromium
-          fi
+          playwright install --with-deps chromium
 
       - name: تشغيل الرادار السحابي وصائد القيعان
         env:
