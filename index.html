@@ -224,7 +224,6 @@
       const icon = document.getElementById('refreshIcon');
       if (icon) icon.classList.add('animate-spin-custom');
       
-      // تصفير الكاش المحلي المحفوظ لضمان جلب النسخة السحابية الجديدة تماماً
       try {
         localStorage.removeItem('qassim_radar_cache');
       } catch (e) {}
@@ -369,7 +368,7 @@
       return Math.round(140 * factor * bags);
     }
 
-    // بناء روابط حجز فورية - حل جذري لتعليق طيران أديل
+    // بناء روابط حجز مؤكدة للذهاب والعودة الصافية
     function buildDirectAirlineUrl(airline, dep, ret, tripType, paxCount = 1) {
       const normAir = normalizeArabic(airline);
       const depC = cleanDate(dep) || getKsaTodayString();
@@ -384,11 +383,13 @@
       const origin = isOneWayIn ? "JED" : "ELQ";
       const destination = isOneWayIn ? "ELQ" : "JED";
 
-      // حل جذري: توجيه طيران أديل والدمج الذكي عبر محرك الفحص السريع المباشر لتفادي حظر الـ WebView والتعليق
       if (normAir.includes("اديل") || normAir.includes("flyadeal") || normAir.includes("دمج ذكي")) {
-        const roundQuery = isRound ? `%20through%20${retC}` : '';
         const carrierFilter = normAir.includes("دمج ذكي") ? '' : '%20flyadeal';
-        return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}${roundQuery}%20nonstop${carrierFilter}&curr=SAR&hl=ar&gl=sa`;
+        if (isRound) {
+          return `https://www.google.com/travel/flights?q=round-trip%20flights%20from%20${origin}%20to%20${destination}%20from%20${depC}%20to%20${retC}%20nonstop${carrierFilter}&curr=SAR&hl=ar&gl=sa`;
+        } else {
+          return `https://www.google.com/travel/flights?q=oneway%20flights%20from%20${origin}%20to%20${destination}%20on%20${depC}%20nonstop${carrierFilter}&curr=SAR&hl=ar&gl=sa`;
+        }
       }
 
       if (normAir.includes("ناس") || normAir.includes("flynas")) {
@@ -396,7 +397,11 @@
       } else if (normAir.includes("السعوديه") || normAir.includes("saudia")) {
         return `https://www.saudia.com/ar/booking?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
       }
-      return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}${isRound ? '%20through%20' + retC : ''}%20nonstop&curr=SAR&hl=ar&gl=sa`;
+
+      if (isRound) {
+        return `https://www.google.com/travel/flights?q=round-trip%20flights%20from%20${origin}%20to%20${destination}%20from%20${depC}%20to%20${retC}%20nonstop&curr=SAR&hl=ar&gl=sa`;
+      }
+      return `https://www.google.com/travel/flights?q=oneway%20flights%20from%20${origin}%20to%20${destination}%20on%20${depC}%20nonstop&curr=SAR&hl=ar&gl=sa`;
     }
 
     function buildHotelInfo(dep, ret, tripType) {
@@ -476,10 +481,10 @@
           if (price <= 358) {
             score = 96; rec = "احجز فوراً (قاع تاريخي)";
             forecast = "السعر في القاع الترويجي الأدنى."; level = "high";
-          } else if (price <= 480) {
+          } else if (price <= 498) {
             score = 87; rec = "سعر اقتصادي ممتاز";
             forecast = "سعر مناسب جداً داخل نافذة الشراء الآمنة."; level = "high";
-          } else if (price <= 640) {
+          } else if (price <= 682) {
             score = 65; rec = "سعر متوسط";
             forecast = "إمكانية طرح مقاعد مخفضة لاحقاً."; level = "medium";
           } else {
@@ -540,7 +545,6 @@
       const timeoutId = setTimeout(() => activeFetchController.abort(), 9000);
 
       try {
-        // كسر الكاش الصارم بمنع التخزين المؤقت تماماً وضمان مطابقة شيت الإكسيل لحظياً
         const res = await fetch('./flights_data.json?t=' + Date.now(), { 
           cache: 'no-store',
           headers: {
@@ -666,7 +670,7 @@
       if (activeFilter === 'deals') {
         filtered = filtered.filter(x => {
           const isOne = !cleanDate(x.ret);
-          return isOne ? (x.price <= 240) : (x.price <= 480);
+          return isOne ? (x.price <= 250) : (x.price <= 500);
         });
       } else if (activeFilter === 'high_confidence') {
         filtered = filtered.filter(x => x.score >= 85);
@@ -690,7 +694,7 @@
         return;
       }
 
-      const marketAvg = marketStats.avg_price || 480;
+      const marketAvg = marketStats.avg_price || 498;
       const fragment = document.createDocumentFragment();
 
       filtered.forEach(item => {
@@ -775,7 +779,6 @@
               ${returnHtml}
             </div>
 
-            <!-- عرض السعر الإجمالي الصافي والسعر الأساسي لإنهاء التعارض مع الإكسيل تماماً -->
             <div class="text-left">
               <span class="text-xs text-slate-400 block">${pax > 1 || bags > 0 ? 'الإجمالي بالحاسبة' : 'سعر التذكرة'}</span>
               <span class="text-2xl font-black text-white">${finalPrice}</span>
@@ -823,7 +826,6 @@
       container.appendChild(fragment);
     }
 
-    // تفعيل مستمع الأحداث المركزي مرة واحدة
     const flightsContainer = document.getElementById('flightsList');
     if (flightsContainer) {
       flightsContainer.addEventListener('click', (e) => {
