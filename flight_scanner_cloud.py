@@ -477,46 +477,27 @@ def parse_flight_card_text(card_element):
     norm_text = raw_text.translate(AR_NUM_MAP)
     price = None
 
-    # 1. الاستخراج ذو الأولوية القصوى: قراءة السعر المقترن بكلمة total / ذهاب وعودة
+    # 1. الاستخراج من السعر الإجمالي المذكور صراحة للرحلتين (Total Price)
     try:
         aria_candidates = [
             card_element.get_attribute("aria-label") or "",
-            card_element.locator("[aria-label*='total'], [aria-label*='SAR'], [aria-label*='ريال']").first.get_attribute("aria-label") or ""
+            card_element.locator("[aria-label*='total'], [aria-label*='SAR'], [aria-label*='Saudi Riyal']").first.get_attribute("aria-label") or ""
         ]
         for a_text in aria_candidates:
             if a_text:
-                # التقاط السعر الموصوف صراحة بالإجمالي
-                m_total = re.search(r'([\d,]+)\s*(?:Saudi Riyals|SAR|ريال)[^.\n]*(?:total|إجمالي|ذهاب وعودة)', a_text, re.IGNORECASE)
-                if not m_total:
-                    m_total = re.search(r'(?:total of|إجمالي)\s*([\d,]+)\s*(?:Saudi Riyals|SAR|ريال)', a_text, re.IGNORECASE)
-                if m_total:
-                    val = int(m_total.group(1).replace(',', ''))
-                    if 300 <= val <= 5000:
-                        price = val
+                # التقاط السعر الموصوف بكلمة total صراحة (مثل: 338 SAR total)
+                m_tot = re.search(r'([\d,]+)\s*(?:Saudi Riyals|SAR|ريال)[^.\n]*(?:total|round trip|ذهاب وعودة)', a_text, re.IGNORECASE)
+                if not m_tot:
+                    m_tot = re.search(r'(?:total of|إجمالي)\s*([\d,]+)\s*(?:Saudi Riyals|SAR|ريال)', a_text, re.IGNORECASE)
+                if m_tot:
+                    v = int(m_tot.group(1).replace(',', ''))
+                    if 250 <= v <= 5000:
+                        price = v
                         break
     except Exception:
         pass
 
-    # 2. الاستخراج من محددات السعر الرسمية مع استبعاد أسعار الاتجاه الواحد (< 300 ريال)
-    if not price:
-        for sel in [".YMlIz", "div.FJP20b", "span[data-gs]", ".GARawf"]:
-            try:
-                elements = card_element.locator(sel).all()
-                for p_el in elements:
-                    t = p_el.inner_text().translate(AR_NUM_MAP)
-                    m = re.search(r'([\d,]+)', t.replace('\xa0', '').replace(' ', ''))
-                    if m:
-                        val = int(m.group(1).replace(',', ''))
-                        # تذكرة الذهاب والعودة لا تقل عن 300 ر.س (سعر القاع 338 ر.س)
-                        if 300 <= val <= 5000:
-                            price = val
-                            break
-                if price:
-                    break
-            except Exception:
-                continue
-
-    # 3. التحليل الشامل لنص الكرت مع تفضيل السعر الأكبر المطابق للرحلتين
+    # 2. استخراج كافة الأسعار المسجلة في البطاقة واختيار السعر الإجمالي للرحلتين
     if not price:
         cleaned = re.sub(r'\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b', '', norm_text)
         cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|kg|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
@@ -527,12 +508,30 @@ def parse_flight_card_text(card_element):
             if v:
                 try:
                     num = int(v.replace(',', ''))
+                    # استبعاد أسعار الاتجاه الواحد الصريحة (التي تقل عن 300 ر.س)
                     if 300 <= num <= 5000:
                         candidates.append(num)
                 except Exception:
                     continue
         if candidates:
+            # اختيار السعر الأدنى من فئات الذهاب والعودة (338 ر.س لأديل أو 364 ر.س للسعودية)
             price = min(candidates)
+
+    # 3. في حال لم يظهر إلا سعر اتجاه واحد صريح (مثل 244 ر.س)، البحث في العنصر الحاوي للسعر الإجمالي
+    if not price:
+        for sel in [".YMlIz", "div.FJP20b", "span[data-gs]"]:
+            try:
+                p_el = card_element.locator(sel).first
+                if p_el.count() > 0:
+                    t = p_el.inner_text().translate(AR_NUM_MAP)
+                    m = re.search(r'([\d,]+)', t.replace('\xa0', '').replace(' ', ''))
+                    if m:
+                        num = int(m.group(1).replace(',', ''))
+                        if 300 <= num <= 5000:
+                            price = num
+                            break
+            except Exception:
+                continue
 
     if not price:
         return None, "", "", ""
@@ -540,7 +539,7 @@ def parse_flight_card_text(card_element):
     # استخراج وقت الإقلاع
     time_ar = ""
     raw_time = ""
-    m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
+    m_time = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
     if m_time:
         raw_time = m_time.group(1).strip()
         if re.search(r'[a-zA-Z]', raw_time):
