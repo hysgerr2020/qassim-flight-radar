@@ -112,14 +112,14 @@ REALISTIC_PROFILES = [
 ]
 
 def build_google_flights_url(dep_clean, ret_clean="", trip_type="roundtrip"):
-    """رابط قياسي صريح يفرض على جوجل جلب حزمة الذهاب والعودة الصافية معاً"""
     origin = "JED" if trip_type == "oneway_in" else "ELQ"
     destination = "ELQ" if trip_type == "oneway_in" else "JED"
 
     if trip_type in ["oneway_out", "oneway_in"] or not ret_clean:
         return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
     else:
-        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20round%20trip%20{dep_clean}%20to%20{ret_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
+        # الصيغة الإنجليزية القياسية المعتمدة في Google Flights لجلب باقة الذهاب والعودة الصافية
+        return f"https://www.google.com/travel/flights?q=Flights%20from%20{origin}%20to%20{destination}%20on%20{dep_clean}%20through%20{ret_clean}%20nonstop&curr=SAR&hl=en&gl=sa"
 
 # ==========================================
 # 🧹 تطهير وأرشفة البيانات التاريخية
@@ -452,11 +452,11 @@ def get_all_monitored_pairs(months_ahead=3):
 def parse_airline_name(text):
     t = text.lower()
     found = []
-    if any(w in t for w in ["flyadeal", "أديل", "f3"]):
+    if any(w in t for w in ["flyadeal", "adeal", "أديل", "f3"]):
         found.append("طيران أديل")
-    if any(w in t for w in ["flynas", "ناس", "xy"]):
+    if any(w in t for w in ["flynas", "nas", "ناس", "xy"]):
         found.append("طيران ناس")
-    if any(w in t for w in ["saudia", "السعودية", "saudi arabian", "sv"]):
+    if any(w in t for w in ["saudia", "saudi arabian", "السعودية", "sv"]):
         found.append("الخطوط السعودية")
 
     if len(found) > 1:
@@ -466,7 +466,7 @@ def parse_airline_name(text):
     return "رحلة مباشرة"
 
 # ==============================================================================
-# 🎯 محرك استخراج السعر الحقيقي المطابق للواقع
+# 🎯 محرك استخراج السعر الصافي للذهاب والعودة من بطاقة الرحلة
 # ==============================================================================
 def parse_flight_card_text(card_element):
     try:
@@ -477,42 +477,34 @@ def parse_flight_card_text(card_element):
     norm_text = raw_text.translate(AR_NUM_MAP)
     price = None
 
-    # الاستخراج المباشر من خصائص السعر الرسمية
+    # 1. الاستخراج المباشر من عنصر السعر الرئيسي
     try:
-        aria_candidates = [
-            card_element.get_attribute("aria-label") or "",
-            card_element.locator("[aria-label*='SAR'], [aria-label*='Saudi Riyal'], [aria-label*='ريال']").first.get_attribute("aria-label") or ""
-        ]
-        for a_text in aria_candidates:
-            if a_text:
-                m = re.search(r'([\d,]+)\s*(?:Saudi Riyals|SAR|ريال)', a_text.replace('\xa0', ''))
-                if m:
-                    val = int(m.group(1).replace(',', ''))
-                    if 120 <= val <= 5000:
-                        price = val
-                        break
+        p_el = card_element.locator(".YMlIz, div.FJP20b").first
+        if p_el.count() > 0:
+            t = p_el.inner_text()
+            m = re.search(r'([\d,]+)', t.replace('\xa0', '').replace(' ', ''))
+            if m:
+                val = int(m.group(1).replace(',', ''))
+                if 120 <= val <= 5000:
+                    price = val
     except Exception:
         pass
 
+    # 2. الاستخراج من خاصية aria-label المعرفة بالبطاقة
     if not price:
-        for sel in [".YMlIz", "div.FJP20b", "span[data-gs]", ".GARawf"]:
-            try:
-                p_el = card_element.locator(sel).first
-                if p_el.count() > 0:
-                    t = p_el.inner_text()
-                    m = re.search(r'([\d,]+)', t.replace('\xa0', '').replace(' ', ''))
-                    if m:
-                        val = int(m.group(1).replace(',', ''))
-                        if 120 <= val <= 5000:
-                            price = val
-                            break
-            except Exception:
-                continue
+        try:
+            aria = card_element.get_attribute("aria-label") or ""
+            m = re.search(r'(?:from\s*)?([\d,]+)\s*(?:Saudi Riyals|SAR)', aria, re.IGNORECASE)
+            if m:
+                val = int(m.group(1).replace(',', ''))
+                if 120 <= val <= 5000:
+                    price = val
+        except Exception:
+            pass
 
+    # 3. الاستخراج الاحتياطي من نص الكرت
     if not price:
-        cleaned = re.sub(r'\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b', '', norm_text)
-        cleaned = re.sub(r'\b\d+\s*(?:hr|hrs|h|min|mins|m|kg|co2e?)\b', '', cleaned, flags=re.IGNORECASE)
-        matches = re.findall(r'(?:SAR|SR)\s*([\d,]+)|([\d,]+)\s*(?:SAR|SR)', cleaned, re.IGNORECASE)
+        matches = re.findall(r'SAR\s*([\d,]+)|([\d,]+)\s*SAR', norm_text, re.IGNORECASE)
         candidates = []
         for m1, m2 in matches:
             v = m1 if m1 else m2
@@ -532,7 +524,7 @@ def parse_flight_card_text(card_element):
     # استخراج وقت الإقلاع
     time_ar = ""
     raw_time = ""
-    m_time = re.search(r'(\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
+    m_time = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)\s*[\u2013\-–]\s*(\d{1,2}:\d{2})', norm_text)
     if m_time:
         raw_time = m_time.group(1).strip()
         if re.search(r'[a-zA-Z]', raw_time):
@@ -717,7 +709,7 @@ def build_briefing_message(items):
 
     min_p = int(cheapest_overall.get("السعر", cheapest_overall.get("price", 0)))
     if min_p <= 360:
-        advice = "🟢 <b>توصية الرادار:</b> الأسعار حالياً في <b>القاع التاريخي (358 ر.س أو أقل)</b>. فرصة ممتازة لتأكيد الحجوزات الآن."
+        advice = "🟢 <b>توصية الرادار:</b> الأسعار حالياً في <b>القاع التاريخي الترويجي (338-364 ر.س)</b>. فرصة ممتازة لتأكيد الحجز فوراً."
     elif min_p <= 498:
         advice = "🟡 <b>توصية الرادار:</b> الأسعار معتدلة ومناسبة للحجز."
     else:
@@ -762,7 +754,7 @@ def build_briefing_message(items):
         f"📍 <b>1. أقرب عطلة نهاية أسبوع:</b>\n"
         f"   🗓 <b>{nw_type}</b>{t_next}\n"
         f"   🛫 ذهاب: <code>{nw_dep}</code> ⬅ عودة: <code>{nw_ret}</code>\n"
-        f"   💰 <b>السعر الإجمالي:</b> <b>{nw_price} ر.س</b> — ✈️ {nw_airline}\n"
+        f"   💰 <b>السعر الإجمالي الصافي:</b> <b>{nw_price} ر.س</b> — ✈️ {nw_airline}\n"
         f"   🎯 <b>مؤشر الثقة:</b> <b>{next_weekend.get('مؤشر_الثقة', next_weekend.get('score', 80))}%</b> ({next_weekend.get('توصية_القرار', next_weekend.get('recommendation', 'سعر مناسب'))})\n"
         f"   ✈️ <a href='{html_href(direct_next)}'>حجز مباشر من موقع {nw_airline} ↗</a>\n"
         f"   🔍 <a href='{html_href(tp_flight_next)}'>مقارنة بدائل التذاكر (تأكيد أفضل سعر) ↗</a>\n"
@@ -960,7 +952,7 @@ def run_custom_date_probe(dep, ret="", trip_type="roundtrip"):
     print("✅ تم إرسال تقرير المسار المخصص للتيليجرام بنجاح!")
 
 # ==========================================
-# ☁️ دورة الفحص السحابي الشاملة
+# ☁️ دورة الفحص السحابي الشاملة لرحلات الذهاب والعودة
 # ==========================================
 def run_cloud_scan():
     if CUSTOM_DEP:
@@ -1031,7 +1023,7 @@ def run_cloud_scan():
                                 page = context.new_page()
                                 page.route("**/*", intercept_route_resources)
 
-                            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                            page.goto(url, wait_until="domcontentloaded", timeout=18000)
 
                             if "consent.google" in page.url:
                                 try:
