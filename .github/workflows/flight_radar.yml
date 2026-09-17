@@ -52,11 +52,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-playwright-chromium-
 
-      - name: تثبيت المكتبات والمتصفح السحابي
+- name: تثبيت المكتبات والمتصفح السحابي
         run: |
           python -m pip install --upgrade pip
           pip install playwright pandas openpyxl matplotlib
-          playwright install --with-deps chromium
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" != "true" ]; then
+            playwright install --with-deps chromium
+          else
+            playwright install-deps chromium
+          fi
 
       - name: تشغيل الرادار السحابي وصائد القيعان
         env:
