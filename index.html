@@ -370,39 +370,39 @@
 
     // بناء روابط حجز مؤكدة للذهاب والعودة الصافية
     function buildDirectAirlineUrl(airline, dep, ret, tripType, paxCount = 1) {
-      const normAir = normalizeArabic(airline);
-      const depC = cleanDate(dep) || getKsaTodayString();
-      const retC = cleanDate(ret);
-      const isRound = Boolean(retC && retC >= depC);
-      const ttParam = isRound ? "RoundTrip" : "OneWay";
-      const retParam = isRound ? `&returnDate=${retC}` : "";
-      const adults = Math.max(1, parseInt(paxCount, 10) || 1);
+  const normAir = normalizeArabic(airline);
+  const depC = cleanDate(dep) || getKsaTodayString();
+  const retC = cleanDate(ret);
+  const isRound = Boolean(retC && retC >= depC);
+  const ttParam = isRound ? "RoundTrip" : "OneWay";
+  const retParam = isRound ? `&returnDate=${retC}` : "";
+  const adults = Math.max(1, parseInt(paxCount, 10) || 1);
 
-      const normType = normalizeArabic(tripType);
-      const isOneWayIn = normType.includes("جده ⬅ القصيم") || normType.includes("عوده فقط") || normType.includes("oneway_in");
-      const origin = isOneWayIn ? "JED" : "ELQ";
-      const destination = isOneWayIn ? "ELQ" : "JED";
+  const normType = normalizeArabic(tripType);
+  const isOneWayIn = normType.includes("جده ⬅ القصيم") || normType.includes("عوده فقط") || normType.includes("oneway_in");
+  const origin = isOneWayIn ? "JED" : "ELQ";
+  const destination = isOneWayIn ? "ELQ" : "JED";
 
-      if (normAir.includes("اديل") || normAir.includes("flyadeal") || normAir.includes("دمج ذكي")) {
-        const carrierFilter = normAir.includes("دمج ذكي") ? '' : '%20flyadeal';
-        if (isRound) {
-          return `https://www.google.com/travel/flights?q=round-trip%20flights%20from%20${origin}%20to%20${destination}%20from%20${depC}%20to%20${retC}%20nonstop${carrierFilter}&curr=SAR&hl=ar&gl=sa`;
-        } else {
-          return `https://www.google.com/travel/flights?q=oneway%20flights%20from%20${origin}%20to%20${destination}%20on%20${depC}%20nonstop${carrierFilter}&curr=SAR&hl=ar&gl=sa`;
-        }
-      }
-
-      if (normAir.includes("ناس") || normAir.includes("flynas")) {
-        return `https://www.flynas.com/ar/booking/flight-search?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
-      } else if (normAir.includes("السعوديه") || normAir.includes("saudia")) {
-        return `https://www.saudia.com/ar/booking?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
-      }
-
-      if (isRound) {
-        return `https://www.google.com/travel/flights?q=round-trip%20flights%20from%20${origin}%20to%20${destination}%20from%20${depC}%20to%20${retC}%20nonstop&curr=SAR&hl=ar&gl=sa`;
-      }
-      return `https://www.google.com/travel/flights?q=oneway%20flights%20from%20${origin}%20to%20${destination}%20on%20${depC}%20nonstop&curr=SAR&hl=ar&gl=sa`;
+  if (normAir.includes("اديل") || normAir.includes("flyadeal") || normAir.includes("دمج ذكي")) {
+    const carrierFilter = normAir.includes("دمج ذكي") ? '' : '%20flyadeal';
+    if (isRound) {
+      return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}%20through%20${retC}%20nonstop${carrierFilter}&curr=SAR&hl=ar&gl=sa`;
+    } else {
+      return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}%20nonstop${carrierFilter}&curr=SAR&hl=ar&gl=sa`;
     }
+  }
+
+  if (normAir.includes("ناس") || normAir.includes("flynas")) {
+    return `https://www.flynas.com/ar/booking/flight-search?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
+  } else if (normAir.includes("السعوديه") || normAir.includes("saudia")) {
+    return `https://www.saudia.com/ar/booking?origin=${origin}&destination=${destination}&departureDate=${depC}${retParam}&adults=${adults}&tripType=${ttParam}`;
+  }
+
+  if (isRound) {
+    return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}%20through%20${retC}%20nonstop&curr=SAR&hl=ar&gl=sa`;
+  }
+  return `https://www.google.com/travel/flights?q=Flights%20from%20${origin}%20to%20${destination}%20on%20${depC}%20nonstop&curr=SAR&hl=ar&gl=sa`;
+}
 
     function buildHotelInfo(dep, ret, tripType) {
       const todayKsa = getKsaTodayString();
